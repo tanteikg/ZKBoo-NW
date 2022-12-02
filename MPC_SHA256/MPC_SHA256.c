@@ -665,12 +665,12 @@ int main(void) {
 	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		unsigned char hash1[SHA256_DIGEST_LENGTH];
-		H(keys[k][0], localViews[k][0], rs[k][0], &hash1);
+		H(keys[k][0], localViews[k][0], rs[k][0], hash1);
 		memcpy(as[k].h[0], &hash1, 32);
-		H(keys[k][1], localViews[k][1], rs[k][1], &hash1);
+		H(keys[k][1], localViews[k][1], rs[k][1], hash1);
 		memcpy(as[k].h[1], &hash1, 32);
-		H(keys[k][2], localViews[k][2], rs[k][2], &hash1);
-		memcpy(as[k].h[2], &hash1, 32);
+		H(keys[k][2], localViews[k][2], rs[k][2], hash1);
+		memcpy(as[k].h[2], hash1, 32);
 	}
 	deltaHash = clock() - beginHash;
 				inMilli = deltaHash * 1000 / CLOCKS_PER_SEC;
