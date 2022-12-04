@@ -1,4 +1,4 @@
-/* name: MPC_SHA512.c
+/*
  * Author: Tan Teik Guan
  * Description : ZKBoo for SHA512
  *
@@ -33,7 +33,7 @@ int totalRandom = 0;
 int totalSha = 0;
 int totalSS = 0;
 int totalHash = 0;
-int NUM_ROUNDS = 10;
+int NUM_ROUNDS = 1;
 
 
 
@@ -147,7 +147,6 @@ void mpc_ADD(uint64_t x[3], uint64_t y[3], uint64_t z[3], unsigned char *randomn
 	z[1]=x[1]^y[1]^c[1];
 	z[2]=x[2]^y[2]^c[2];
 
-
 	views[0].y[*countY] = c[0];
 	views[1].y[*countY] = c[1];
 	views[2].y[*countY] = c[2];
@@ -200,7 +199,7 @@ void mpc_ADDK(uint64_t x[3], uint64_t y, uint64_t z[3], unsigned char *randomnes
 
 }
 
-
+/*
 int sha512(unsigned char* result, unsigned char* input, int numBits) {
 	uint64_t hA[8] = { 0x6A09E667F3BCC908, 0xBB67AE8584CAA73B, 0x3C6EF372FE94F82B, 0xA54FF53A5F1D36F1,
 			0x510E527FADE682D1, 0x9B05688C2B3E6C1F, 0x1F83D9ABFB41BD6B, 0x5BE0CD19137E2179};
@@ -294,7 +293,7 @@ int sha512(unsigned char* result, unsigned char* input, int numBits) {
 	}
 	return 0;
 }
-
+*/
 void mpc_RIGHTROTATE(uint64_t x[], int i, uint64_t z[]) {
 	z[0] = RIGHTROTATE(x[0], i);
 	z[1] = RIGHTROTATE(x[1], i);
@@ -329,11 +328,13 @@ void mpc_MAJ(uint64_t a[], uint64_t b[3], uint64_t c[3], uint64_t z[3], unsigned
 
 void mpc_CH(uint64_t e[], uint64_t f[3], uint64_t g[3], uint64_t z[3], unsigned char *randomness[3], int* randCount, View views[3], int* countY) {
 	uint64_t t0[3];
+	uint64_t t1[3];
+	uint64_t t2[3];
 
-	//e & (f^g) ^ g
-	mpc_XOR(f,g,t0);
-	mpc_AND(e,t0,t0, randomness, randCount, views, countY);
-	mpc_XOR(t0,g,z);
+	mpc_AND(e,f,t0, randomness, randCount, views, countY);
+	mpc_NEGATE(e,t1);
+	mpc_AND(t1,g,t2, randomness, randCount, views, countY);
+	mpc_OR(t0,t2,z, randomness, randCount, views, countY);
 
 }
 
@@ -377,7 +378,6 @@ int mpc_sha512(unsigned char* results[3], unsigned char* inputs[3], int numBits,
 		}
 		free(chunks[i]);
 	}
-printf("w %lX \n",w[0][0]^w[0][1]^w[0][2]);
 
 	uint64_t s0[3], s1[3];
 	uint64_t t0[3], t1[3];
@@ -396,12 +396,11 @@ printf("w %lX \n",w[0][0]^w[0][1]^w[0][2]);
 			mpc_RIGHTROTATE(W(i+14), 19, t0);
 			mpc_RIGHTROTATE(W(i+14), 61, t1);
 			mpc_XOR(t0, t1, t0);
-			mpc_RIGHTSHIFT(W(i+14), 8, t1);
+			mpc_RIGHTSHIFT(W(i+14), 6, t1);
 			mpc_XOR(t0, t1, s0);
 
 			mpc_RIGHTROTATE(W(i+1), 1, t0);
 			mpc_RIGHTROTATE(W(i+1), 8, t1);
-
 			mpc_XOR(t0, t1, t0);
 			mpc_RIGHTSHIFT(W(i+1), 7, t1);
 			mpc_XOR(t0, t1, s1);
@@ -409,8 +408,8 @@ printf("w %lX \n",w[0][0]^w[0][1]^w[0][2]);
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
 
 			mpc_ADD(W(i+9), s0, t1, randomness, randCount, views, countY);
-			mpc_ADD(W(i), t1, t1, randomness, randCount, views, countY);
-			mpc_ADD(t1, s1, W(i), randomness, randCount, views, countY);
+			mpc_ADD(s1, t1, t1, randomness, randCount, views, countY);
+			mpc_ADD(W(i), t1, W(i), randomness, randCount, views, countY);
 
 		}
 
@@ -443,9 +442,9 @@ printf("w %lX \n",w[0][0]^w[0][1]^w[0][2]);
 		//s0 = RIGHTROTATE(a,2) ^ RIGHTROTATE(a,13) ^ RIGHTROTATE(a,22);
 		mpc_RIGHTROTATE(a, 28, t0);
 		mpc_RIGHTROTATE(a, 34, t1);
-		mpc_OR(t0, t1, t0, randomness, randCount, views, countY);
+		mpc_XOR(t0, t1, t0);
 		mpc_RIGHTROTATE(a, 39, t1);
-		mpc_OR(t0, t1, s0, randomness, randCount, views, countY);
+		mpc_XOR(t0, t1, s0);
 
 
 		mpc_MAJ(a, b, c, maj, randomness, randCount, views, countY);
@@ -511,6 +510,7 @@ printf("w %lX \n",w[0][0]^w[0][1]^w[0][2]);
 		results[1][i * 8 + 7] = hHa[i][1];
 		results[2][i * 8 + 7] = hHa[i][2];
 	}
+printf("randCount %d\n",*randCount);
 	free(randCount);
 
 	return 0;
@@ -559,7 +559,6 @@ a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomne
 	hashes[0] = malloc(64);
 	hashes[1] = malloc(64);
 	hashes[2] = malloc(64);
-printf("numbytes %d, input %c%c\n",numBytes,inputs[0][0]^inputs[1][0]^inputs[2][0],inputs[0][1]^inputs[1][1]^inputs[2][1]);
 
 	int* countY = calloc(1, sizeof(int));
 	mpc_sha512(hashes, inputs, numBytes * 8, randomness, views, countY);
@@ -590,6 +589,7 @@ printf("numbytes %d, input %c%c\n",numBytes,inputs[0][0]^inputs[1][0]^inputs[2][
 
 		*countY += 1;
 	}
+printf("countY %d\n",*countY);
 	free(countY);
 	free(hashes[0]);
 	free(hashes[1]);

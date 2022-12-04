@@ -57,8 +57,8 @@ static const uint64_t k[80] =
 };
 
 //#define ySize 736
-#define ySize 1088 
-#define rSize 8648 
+#define ySize 1408 
+#define rSize 11200 
 
 typedef struct {
 	unsigned char x[64];
@@ -81,7 +81,7 @@ typedef struct {
 
 #define RIGHTROTATE(x,n) (((x) >> (n)) | ((x) << (64-(n))))
 #define GETBIT(x, i) (((x) >> (i)) & 0x01)
-#define SETBIT(x, i, b)   x= (b)&1 ? (x)|(1 << (i)) : (x)&(~(1 << (i)))
+#define SETBIT(x, i, b)   x= (b)&1 ? (x)|((uint64_t)1 << (i)) : (x)&(~((uint64_t)1 << (i)))
 
 
 
