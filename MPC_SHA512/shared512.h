@@ -27,7 +27,8 @@
 #include <openssl/rand.h>
 #include "omp.h"
 
-#define VERBOSE FALSE
+#define VERBOSE 1 
+#define W(t) w[(t) & 0x0F]
 
 static const uint64_t hA[8] = { 0x6A09E667F3BCC908, 0xBB67AE8584CAA73B, 0x3C6EF372FE94F82B, 0xA54FF53A5F1D36F1,
 		0x510E527FADE682D1, 0x9B05688C2B3E6C1F, 0x1F83D9ABFB41BD6B, 0x5BE0CD19137E2179};
@@ -61,13 +62,13 @@ static const uint64_t k[80] =
 #define rSize 11200 
 
 typedef struct {
-	unsigned char x[64];
+	unsigned char x[128];
 	uint64_t y[ySize];
 } View;
 
 typedef struct {
 	uint64_t yp[3][8];
-	unsigned char h[3][32];
+	unsigned char h[3][64];
 } a;
 
 typedef struct {
@@ -213,7 +214,7 @@ void H3(uint64_t y[8], a* as, int s, int* es) {
 }
 
 void output(View v, uint64_t* result) {
-	memcpy(result, &v.y[ySize - 16], 64);
+	memcpy(result, &v.y[ySize - 8], 64);
 }
 
 void reconstruct(uint64_t* y0, uint64_t* y1, uint64_t* y2, uint64_t* result) {
@@ -280,7 +281,7 @@ void openmp_thread_cleanup(void)
 
 int mpc_AND_verify(uint64_t x[2], uint64_t y[2], uint64_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
 	uint64_t r[2] = { getRandom64(randomness[0], *randCount), getRandom64(randomness[1], *randCount) };
-	*randCount += 4;
+	*randCount += 8;
 
 	uint64_t t = 0;
 
@@ -298,7 +299,7 @@ int mpc_AND_verify(uint64_t x[2], uint64_t y[2], uint64_t z[2], View ve, View ve
 
 int mpc_ADD_verify(uint64_t x[2], uint64_t y[2], uint64_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
 	uint64_t r[2] = { getRandom64(randomness[0], *randCount), getRandom64(randomness[1], *randCount) };
-	*randCount += 4;
+	*randCount += 8;
 
 	uint8_t a[2], b[2];
 
@@ -334,28 +335,61 @@ void mpc_RIGHTSHIFT2(uint64_t x[2], int i, uint64_t z[2]) {
 	z[1] = x[1] >> i;
 }
 
+int mpc_OR_verify(uint64_t x[2], uint64_t y[2], uint64_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) 
+{
+	uint64_t t0[3];
+	uint64_t t1[3];
+	uint64_t t2[3];
+
+	mpc_NEGATE2(x,t0);
+	mpc_NEGATE2(y,t1);
+	if (mpc_AND_verify(t0,t1,t2,ve,ve1,randomness,randCount,countY) == 1)
+	{
+		return 1;
+	}
+	mpc_NEGATE2(t2,z);
+}
+
 
 int mpc_MAJ_verify(uint64_t a[2], uint64_t b[2], uint64_t c[2], uint64_t z[3], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
 	uint64_t t0[3];
 	uint64_t t1[3];
+	uint64_t t2[3];
 
-	mpc_XOR2(a, b, t0);
-	mpc_XOR2(a, c, t1);
-	if(mpc_AND_verify(t0, t1, z, ve, ve1, randomness, randCount, countY) == 1) {
+	if(mpc_AND_verify(a, b, t0, ve, ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	mpc_XOR2(z, a, z);
+	if(mpc_AND_verify(b, c, t1, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
+	if(mpc_AND_verify(c, a, t2, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
+	if(mpc_OR_verify(t0, t1, z, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
+	if(mpc_OR_verify(t2, z, z, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
 	return 0;
 }
 
 int mpc_CH_verify(uint64_t e[2], uint64_t f[2], uint64_t g[2], uint64_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
 
 	uint64_t t0[3];
-	mpc_XOR2(f,g,t0);
-	if(mpc_AND_verify(e, t0, t0, ve, ve1, randomness, randCount, countY) == 1) {
+	uint64_t t1[3];
+	uint64_t t2[3];
+
+	if(mpc_AND_verify(e, f, t0, ve, ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	mpc_XOR2(t0,g,z);
+	mpc_NEGATE2(e,t1);
+	if(mpc_AND_verify(t1, g, t2, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
+	if(mpc_OR_verify(t0, t2, z, ve, ve1, randomness, randCount, countY) == 1) {
+		return 1;
+	}
 
 
 	return 0;
@@ -366,7 +400,7 @@ int verify(a a, int e, z z) {
 	unsigned char* hash = malloc(SHA512_DIGEST_LENGTH);
 	H(z.ke, z.ve, z.re, hash);
 
-	if (memcmp(a.h[e], hash, 32) != 0) {
+	if (memcmp(a.h[e], hash, 64) != 0) {
 #if VERBOSE
 		printf("Failing at %d", __LINE__);
 #endif
@@ -399,7 +433,6 @@ int verify(a a, int e, z z) {
 	}
 
 	free(result);
-
 	unsigned char randomness[2][rSize];
 	getAllRandomness(z.ke, randomness[0]);
 	getAllRandomness(z.ke1, randomness[1]);
@@ -409,56 +442,18 @@ int verify(a a, int e, z z) {
 
 	uint64_t w[16][2];
 	for (int j = 0; j < 16; j++) {
-		w[j][0] = (z.ve.x[j * 8] << 24) | (z.ve.x[j * 8 + 1] << 16)
-								| (z.ve.x[j * 4 + 2] << 8) | z.ve.x[j * 4 + 3];
-		w[j][1] = (z.ve1.x[j * 4] << 24) | (z.ve1.x[j * 4 + 1] << 16)
-								| (z.ve1.x[j * 4 + 2] << 8) | z.ve1.x[j * 4 + 3];
+		w[j][0] = ((uint64_t)z.ve.x[j * 8] << 56) | ((uint64_t)z.ve.x[j * 8 + 1] << 48)
+			| ((uint64_t)z.ve.x[j * 8 + 2] << 40) | ((uint64_t)z.ve.x[j * 8 + 3] << 32)
+			| ((uint64_t)z.ve.x[j * 8 + 4] << 24) | ((uint64_t)z.ve.x[j * 8 + 5] << 16)
+			| ((uint64_t)z.ve.x[j * 8 + 6] << 8) | (uint64_t)z.ve.x[j * 8 + 7];
+		w[j][1] = ((uint64_t)z.ve1.x[j * 8] << 56) | ((uint64_t)z.ve1.x[j * 8 + 1] << 48)
+			| ((uint64_t)z.ve1.x[j * 8 + 2] << 40) | ((uint64_t)z.ve1.x[j * 8 + 3] << 32)
+			| ((uint64_t)z.ve1.x[j * 8 + 4] << 24) | ((uint64_t)z.ve1.x[j * 8 + 5] << 16)
+			| ((uint64_t)z.ve1.x[j * 8 + 6] << 8) | (uint64_t)z.ve1.x[j * 8 + 7];
 	}
 
 	uint64_t s0[2], s1[2];
 	uint64_t t0[2], t1[2];
-	for (int j = 16; j < 80; j++) {
-		//s0[i] = RIGHTROTATE(w[i][j-15],7) ^ RIGHTROTATE(w[i][j-15],18) ^ (w[i][j-15] >> 3);
-		mpc_RIGHTROTATE2(w[j-15], 7, t0);
-		mpc_RIGHTROTATE2(w[j-15], 18, t1);
-		mpc_XOR2(t0, t1, t0);
-		mpc_RIGHTSHIFT2(w[j-15], 3, t1);
-		mpc_XOR2(t0, t1, s0);
-
-		//s1[i] = RIGHTROTATE(w[i][j-2],17) ^ RIGHTROTATE(w[i][j-2],19) ^ (w[i][j-2] >> 10);
-		mpc_RIGHTROTATE2(w[j-2], 17, t0);
-		mpc_RIGHTROTATE2(w[j-2], 19, t1);
-		mpc_XOR2(t0, t1, t0);
-		mpc_RIGHTSHIFT2(w[j-2],10,t1);
-		mpc_XOR2(t0, t1, s1);
-
-		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
-
-		if(mpc_ADD_verify(w[j-16], s0, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
-#if VERBOSE
-		printf("Failing at %d, iteration %d", __LINE__, j);
-#endif
-			return 1;
-		}
-
-
-		if(mpc_ADD_verify(w[j-7], t1, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
-#if VERBOSE
-		printf("Failing at %d, iteration %d", __LINE__, j);
-#endif
-			return 1;
-		}
-		if(mpc_ADD_verify(t1, s1, w[j], z.ve, z.ve1, randomness, randCount, countY) == 1) {
-#if VERBOSE
-		printf("Failing at %d, iteration %d", __LINE__, j);
-#endif
-			return 1;
-		}
-
-	}
-
-
-
 	uint64_t va[2] = { hA[0],hA[0] };
 	uint64_t vb[2] = { hA[1],hA[1] };
 	uint64_t vc[2] = { hA[2],hA[2] };
@@ -468,12 +463,52 @@ int verify(a a, int e, z z) {
 	uint64_t vg[2] = { hA[6],hA[6] };
 	uint64_t vh[2] = { hA[7],hA[7] };
 	uint64_t temp1[3], temp2[3], maj[3];
-	for (int i = 0; i < 80; i++) {
+	for (int i = 0; i < 80; i++) 
+	{
+		if (i>=16) 
+		{
+			mpc_RIGHTROTATE2(W(i+14), 19, t0);
+			mpc_RIGHTROTATE2(W(i+14), 61, t1);
+			mpc_XOR2(t0, t1, t0);
+			mpc_RIGHTSHIFT2(W(i+14), 6, t1);
+			mpc_XOR2(t0, t1, s0);
+
+			mpc_RIGHTROTATE2(W(i+1), 1, t0);
+			mpc_RIGHTROTATE2(W(i+1), 8, t1);
+			mpc_XOR2(t0, t1, t0);
+			mpc_RIGHTSHIFT2(W(i+1),7,t1);
+			mpc_XOR2(t0, t1, s1);
+
+		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
+
+			if(mpc_ADD_verify(W(i+9), s0, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+#if VERBOSE
+		printf("Failing at %d, iteration %d", __LINE__, i);
+#endif
+				return 1;
+			}
+
+
+			if(mpc_ADD_verify(s1, t1, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+#if VERBOSE
+		printf("Failing at %d, iteration %d", __LINE__, i);
+#endif
+				return 1;
+			}
+			if(mpc_ADD_verify(W(i), t1, W(i), z.ve, z.ve1, randomness, randCount, countY) == 1) {
+#if VERBOSE
+		printf("Failing at %d, iteration %d", __LINE__, i);
+#endif
+				return 1;
+			}
+
+		}
+
 		//s1 = RIGHTROTATE(e,6) ^ RIGHTROTATE(e,11) ^ RIGHTROTATE(e,25);
-		mpc_RIGHTROTATE2(ve, 6, t0);
-		mpc_RIGHTROTATE2(ve, 11, t1);
+		mpc_RIGHTROTATE2(ve, 14, t0);
+		mpc_RIGHTROTATE2(ve, 18, t1);
 		mpc_XOR2(t0, t1, t0);
-		mpc_RIGHTROTATE2(ve, 25, t1);
+		mpc_RIGHTROTATE2(ve, 41, t1);
 		mpc_XOR2(t0, t1, s1);
 
 
@@ -490,8 +525,6 @@ int verify(a a, int e, z z) {
 #endif
 			return 1;
 		}
-
-
 
 		if(mpc_CH_verify(ve, vf, vg, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
 #if VERBOSE
@@ -520,8 +553,7 @@ int verify(a a, int e, z z) {
 		}
 
 
-
-		if(mpc_ADD_verify(t1, w[i], temp1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(t1, W(i), temp1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
 #if VERBOSE
 		printf("Failing at %d, iteration %d", __LINE__, i);
 #endif
@@ -529,10 +561,10 @@ int verify(a a, int e, z z) {
 		}
 
 		//s0 = RIGHTROTATE(a,2) ^ RIGHTROTATE(a,13) ^ RIGHTROTATE(a,22);
-		mpc_RIGHTROTATE2(va, 2, t0);
-		mpc_RIGHTROTATE2(va, 13, t1);
+		mpc_RIGHTROTATE2(va, 28, t0);
+		mpc_RIGHTROTATE2(va, 34, t1);
 		mpc_XOR2(t0, t1, t0);
-		mpc_RIGHTROTATE2(va, 22, t1);
+		mpc_RIGHTROTATE2(va, 39, t1);
 		mpc_XOR2(t0, t1, s0);
 
 		//maj = (a & (b ^ c)) ^ (b & c);
@@ -555,9 +587,9 @@ int verify(a a, int e, z z) {
 
 
 
-		memcpy(vh, vg, sizeof(uint32_t) * 2);
-		memcpy(vg, vf, sizeof(uint32_t) * 2);
-		memcpy(vf, ve, sizeof(uint32_t) * 2);
+		memcpy(vh, vg, sizeof(uint64_t) * 2);
+		memcpy(vg, vf, sizeof(uint64_t) * 2);
+		memcpy(vf, ve, sizeof(uint64_t) * 2);
 		//e = d+temp1;
 		if(mpc_ADD_verify(vd, temp1, ve, z.ve, z.ve1, randomness, randCount, countY) == 1) {
 #if VERBOSE
@@ -566,9 +598,9 @@ int verify(a a, int e, z z) {
 			return 1;
 		}
 
-		memcpy(vd, vc, sizeof(uint32_t) * 2);
-		memcpy(vc, vb, sizeof(uint32_t) * 2);
-		memcpy(vb, va, sizeof(uint32_t) * 2);
+		memcpy(vd, vc, sizeof(uint64_t) * 2);
+		memcpy(vc, vb, sizeof(uint64_t) * 2);
+		memcpy(vb, va, sizeof(uint64_t) * 2);
 		//a = temp1+temp2;
 
 		if(mpc_ADD_verify(temp1, temp2, va, z.ve, z.ve1, randomness, randCount, countY) == 1) {

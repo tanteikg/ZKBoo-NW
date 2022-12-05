@@ -20,22 +20,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 #include "shared512.h"
 #include "omp.h"
 
 
 #define CH(e,f,g) ((e & f) | ((~e) & g))
-#define W(t) w[(t) & 0x0F]
 
 
 int totalRandom = 0;
 int totalSha = 0;
 int totalSS = 0;
 int totalHash = 0;
-int NUM_ROUNDS = 1;
-
-
+int NUM_ROUNDS = 32;
 
 
 uint32_t rand32() {
@@ -199,108 +196,11 @@ void mpc_ADDK(uint64_t x[3], uint64_t y, uint64_t z[3], unsigned char *randomnes
 
 }
 
-/*
-int sha512(unsigned char* result, unsigned char* input, int numBits) {
-	uint64_t hA[8] = { 0x6A09E667F3BCC908, 0xBB67AE8584CAA73B, 0x3C6EF372FE94F82B, 0xA54FF53A5F1D36F1,
-			0x510E527FADE682D1, 0x9B05688C2B3E6C1F, 0x1F83D9ABFB41BD6B, 0x5BE0CD19137E2179};
-
-
-	if (numBits > 1000) {
-		printf("Input too long, aborting!");
-		return -1;
-	}
-	int chars = numBits >> 3;
-	unsigned char* chunk = calloc(128, 1); //1024 bits
-	memcpy(chunk, input, chars);
-	chunk[chars] = 0x80;
-	//Last 8 chars used for storing length of input without padding, in big-endian.
-	//Since we only care for one block, we are safe with just using last 9 bits and 0'ing the rest
-
-	chunk[124] = numBits >> 24;
-	chunk[125] = numBits >> 16;
-	chunk[126] = numBits >> 8;
-	chunk[127] = numBits;
-
-	uint64_t w[16];
-	int i, t;
-	for (i = 0; i < 16; i++) {
-		w[i] = ((uint64_t)chunk[i * 8] << 56) | ((uint64_t)chunk[i * 8 + 1] << 48)
-			| ((uint64_t)chunk[i * 8 + 2] << 40) | ((uint64_t)chunk[i * 8 + 3] << 32)
-			| ((uint64_t)chunk[i * 8 + 4] << 24) | ((uint64_t)chunk[i * 8 + 5] << 16)
-			| ((uint64_t)chunk[i * 8 + 6] << 8) | (uint64_t)chunk[i * 8 + 7];
-	}
-
-	uint64_t s0, s1;
-
-	for (i = 16; i < 80; i++) {
-		s0 = RIGHTROTATE(W(i + 14), 19) ^ RIGHTROTATE(W(i + 14), 61)
-						^ (W(i + 14) >> 6);
-		s1 = RIGHTROTATE(W(i + 1), 1) ^ RIGHTROTATE(W(i + 1), 8)
-						^ (W(i + 1) >> 7);
-		W(i) += W(i + 9) + s0 + s1;
-	}
-
-	uint64_t a, b, c, d, e, f, g, h, temp1, temp2, maj;
-	a = hA[0];
-	b = hA[1];
-	c = hA[2];
-	d = hA[3];
-	e = hA[4];
-	f = hA[5];
-	g = hA[6];
-	h = hA[7];
-
-	for (i = 0; i < 80; i++) {
-		s1 = RIGHTROTATE(e,14) ^ RIGHTROTATE(e, 18) ^ RIGHTROTATE(e, 41);
-
-		temp1 = h + s1 + CH(e, f, g) + k[i] + W(i);
-		s0 = RIGHTROTATE(a,28) ^ RIGHTROTATE(a, 34) ^ RIGHTROTATE(a, 39);
-
-
-		maj = ((a & b) | (b & c)) | (a & c);
-		temp2 = s0 + maj;
-
-
-		h = g;
-		g = f;
-		f = e;
-		e = d + temp1;
-		d = c;
-		c = b;
-		b = a;
-		a = temp1 + temp2;
-
-	}
-
-	hA[0] += a;
-	hA[1] += b;
-	hA[2] += c;
-	hA[3] += d;
-	hA[4] += e;
-	hA[5] += f;
-	hA[6] += g;
-	hA[7] += h;
-
-	for (i = 0; i < 8; i++) {
-		result[i * 8] = (hA[i] >> 56);
-		result[i * 8 + 1] = (hA[i] >> 48);
-		result[i * 8 + 2] = (hA[i] >> 40);
-		result[i * 8 + 3] = (hA[i] >> 32);
-		result[i * 8 + 4] = (hA[i] >> 24);
-		result[i * 8 + 5] = (hA[i] >> 16);
-		result[i * 8 + 6] = (hA[i] >> 8);
-		result[i * 8 + 7] = hA[i];
-	}
-	return 0;
-}
-*/
 void mpc_RIGHTROTATE(uint64_t x[], int i, uint64_t z[]) {
 	z[0] = RIGHTROTATE(x[0], i);
 	z[1] = RIGHTROTATE(x[1], i);
 	z[2] = RIGHTROTATE(x[2], i);
 }
-
-
 
 
 void mpc_RIGHTSHIFT(uint64_t x[3], int i, uint64_t z[3]) {
@@ -426,8 +326,8 @@ int mpc_sha512(unsigned char* results[3], unsigned char* inputs[3], int numBits,
 		//temp1 = h + s1 + CH(e,f,g) + k[i]+w[i];
 
 		//t0 = h + s1
-
 		mpc_ADD(h, s1, t0, randomness, randCount, views, countY);
+
 
 
 		mpc_CH(e, f, g, t1, randomness, randCount, views, countY);
@@ -510,7 +410,7 @@ int mpc_sha512(unsigned char* results[3], unsigned char* inputs[3], int numBits,
 		results[1][i * 8 + 7] = hHa[i][1];
 		results[2][i * 8 + 7] = hHa[i][2];
 	}
-printf("randCount %d\n",*randCount);
+//printf("randCount %d\n",*randCount);
 	free(randCount);
 
 	return 0;
@@ -549,7 +449,7 @@ int secretShare(unsigned char* input, int numBytes, unsigned char output[3][numB
 
 
 a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomness[3], unsigned char rs[3][4], View views[3]) {
-
+static int printonce=0;
 
 	unsigned char* inputs[3];
 	inputs[0] = shares[0];
@@ -563,7 +463,9 @@ a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomne
 	int* countY = calloc(1, sizeof(int));
 	mpc_sha512(hashes, inputs, numBytes * 8, randomness, views, countY);
 
+	if (!printonce) // just for debug
 	{
+		printonce=1;
 		printf("hash obtained is: ");
 		for (int i = 0; i < 64; i++)
 		{
@@ -589,7 +491,7 @@ a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomne
 
 		*countY += 1;
 	}
-printf("countY %d\n",*countY);
+//printf("countY %d\n",*countY);
 	free(countY);
 	free(hashes[0]);
 	free(hashes[1]);
@@ -633,7 +535,7 @@ int main(void) {
 	srand((unsigned) time(NULL));
 	init_EVP();
 	openmp_thread_setup();
-
+	struct timeval begin, delta;
 	//
 	unsigned char garbage[4];
 	if(RAND_bytes(garbage, 4) != 1) {
@@ -657,7 +559,7 @@ int main(void) {
 		input[j] = userInput[j];
 	}
 
-	clock_t begin = clock(), delta, deltaA;
+	gettimeofday(&begin,NULL);
 	unsigned char rs[NUM_ROUNDS][3][4];
 	unsigned char keys[NUM_ROUNDS][3][16];
 	a as[NUM_ROUNDS];
@@ -674,19 +576,15 @@ int main(void) {
 		printf("RAND_bytes failed crypto, aborting\n");
 		return 0;
 	}
-	deltaCrypto = clock() - beginCrypto;
-	int inMilliCrypto = deltaCrypto * 1000 / CLOCKS_PER_SEC;
-	totalCrypto = inMilliCrypto;
 	
 
 	//Sharing secrets
-	clock_t beginSS = clock(), deltaSS;
 	unsigned char shares[NUM_ROUNDS][3][i];
 	if(RAND_bytes((unsigned char *)shares, NUM_ROUNDS*3*i) != 1) {
 		printf("RAND_bytes failed crypto, aborting\n");
 		return 0;
 	}
-	//#pragma omp parallel for
+	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 
 		for (int j = 0; j < i; j++) {
@@ -694,12 +592,8 @@ int main(void) {
 		}
 
 	}
-	deltaSS = clock() - beginSS;
-	int inMilli = deltaSS * 1000 / CLOCKS_PER_SEC;
-	totalSS = inMilli;
 
 	//Generating randomness
-	clock_t beginRandom = clock(), deltaRandom;
 	unsigned char *randomness[NUM_ROUNDS][3];
 	//#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
@@ -709,26 +603,16 @@ int main(void) {
 		}
 	}
 
-	deltaRandom = clock() - beginRandom;
-	inMilli = deltaRandom * 1000 / CLOCKS_PER_SEC;
-	totalRandom = inMilli;
-
-	//Running MPC-SHA2
-	clock_t beginSha = clock(), deltaSha;
-	//#pragma omp parallel for
+	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		as[k] = commit(i, shares[k], randomness[k], rs[k], localViews[k]);
 		for(int j=0; j<3; j++) {
 			free(randomness[k][j]);
 		}
 	}
-	deltaSha = clock() - beginSha;
-	inMilli = deltaSha * 1000 / CLOCKS_PER_SEC;
-	totalSha = inMilli;
 	
 	//Committing
-	clock_t beginHash = clock(), deltaHash;
-	//#pragma omp parallel for
+	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		unsigned char hash1[SHA512_DIGEST_LENGTH];
 		H(keys[k][0], localViews[k][0], rs[k][0], hash1);
@@ -738,39 +622,30 @@ int main(void) {
 		H(keys[k][2], localViews[k][2], rs[k][2], hash1);
 		memcpy(as[k].h[2], hash1, 64);
 	}
-	deltaHash = clock() - beginHash;
-				inMilli = deltaHash * 1000 / CLOCKS_PER_SEC;
-				totalHash += inMilli;
-				
-	deltaA = clock() - begin;
-	int inMilliA = deltaA * 1000 / CLOCKS_PER_SEC;
 
 	//Generating E
-	clock_t beginE = clock(), deltaE;
 	int es[NUM_ROUNDS];
 	uint64_t finalHash[8];
 	for (int j = 0; j < 8; j++) {
 		finalHash[j] = as[0].yp[0][j]^as[0].yp[1][j]^as[0].yp[2][j];
 	}
 	H3(finalHash, as, NUM_ROUNDS, es);
-	deltaE = clock() - beginE;
-	int inMilliE = deltaE * 1000 / CLOCKS_PER_SEC;
 
 
 	//Packing Z
-	clock_t beginZ = clock(), deltaZ;
 	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
 
 	//#pragma omp parallel for
 	for(int i = 0; i<NUM_ROUNDS; i++) {
 		zs[i] = prove(es[i],keys[i],rs[i], localViews[i]);
 	}
-	deltaZ = clock() - beginZ;
-	int inMilliZ = deltaZ * 1000 / CLOCKS_PER_SEC;
 	
+	gettimeofday(&delta,NULL);
+	unsigned long inMilli = (delta.tv_sec - begin.tv_sec)*1000000 + (delta.tv_usec - begin.tv_usec);
+	inMilli /= 1000;
+
 	
 	//Writing to file
-	clock_t beginWrite = clock();
 	FILE *file;
 
 	char outputFile[3*sizeof(int) + 8];
@@ -785,36 +660,13 @@ int main(void) {
 
 	fclose(file);
 
-	clock_t deltaWrite = clock()-beginWrite;
 	free(zs);
-	int inMilliWrite = deltaWrite * 1000 / CLOCKS_PER_SEC;
 
 
-	delta = clock() - begin;
-	inMilli = delta * 1000 / CLOCKS_PER_SEC;
 
-	int sumOfParts = 0;
-
-	printf("Generating A: %ju\n", (uintmax_t)inMilliA);
-	printf("	Generating keys: %ju\n", (uintmax_t)totalCrypto);
-	sumOfParts += totalCrypto;
-	printf("	Generating randomness: %ju\n", (uintmax_t)totalRandom);
-	sumOfParts += totalRandom;
-	printf("	Sharing secrets: %ju\n", (uintmax_t)totalSS);
-	sumOfParts += totalSS;
-	printf("	Running MPC-SHA2: %ju\n", (uintmax_t)totalSha);
-	sumOfParts += totalSha;
-	printf("	Committing: %ju\n", (uintmax_t)totalHash);
-	sumOfParts += totalHash;
-	printf("	*Accounted for*: %ju\n", (uintmax_t)sumOfParts);
-	printf("Generating E: %ju\n", (uintmax_t)inMilliE);
-	printf("Packing Z: %ju\n", (uintmax_t)inMilliZ);
-	printf("Writing file: %ju\n", (uintmax_t)inMilliWrite);
-	printf("Total: %d\n",inMilli);
 	printf("\n");
-	printf("Proof output to file %s", outputFile);
-
-
+	printf("Proof output to file %s\n", outputFile);
+	printf("time taken: %ld miliseconds\n",inMilli);
 
 	openmp_thread_cleanup();
 	cleanup_EVP();
