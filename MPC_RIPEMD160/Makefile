@@ -1,0 +1,10 @@
+TARGETS: MPC_RIPEMD160.exe MPC_RIPEMD160_VERIFIER.exe 
+
+MPC_RIPEMD160.exe: MPC_RIPEMD160.c sharedripe.h
+	gcc -g -fopenmp MPC_RIPEMD160.c -o MPC_RIPEMD160.exe -lssl -lcrypto
+
+MPC_RIPEMD160_VERIFIER.exe: MPC_RIPEMD160_VERIFIER.c sharedripe.h
+	gcc -fopenmp MPC_RIPEMD160_VERIFIER.c -o MPC_RIPEMD160_VERIFIER.exe -lssl -lcrypto
+
+clean:
+	rm MPC_RIPEMD160.exe MPC_RIPEMD160_VERIFIER.exe
