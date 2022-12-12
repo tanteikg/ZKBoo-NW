@@ -54,6 +54,8 @@ int totalHash = 0;
 int NUM_ROUNDS = 32;
 
 
+int debug = 0;
+
 uint32_t rand32() {
 	uint32_t x;
 	x = rand() & 0xff;
@@ -253,7 +255,7 @@ void mpc_H(uint32_t x1[3], uint32_t x2[3], uint32_t x3[3], uint32_t z[3], unsign
 
 	mpc_NEGATE(x2,t0);
 	mpc_OR(x1,t0,t1,randomness,randCount,views,countY);
-	mpc_XOR(t1,x2,z);
+	mpc_XOR(t1,x3,z);
 
 }
 
@@ -275,9 +277,9 @@ void mpc_J(uint32_t x1[3], uint32_t x2[3], uint32_t x3[3], uint32_t z[3], unsign
 	uint32_t t0[3] = { 0 };
 	uint32_t t1[3] = { 0 };
 
-	mpc_XOR(x1,x2,t0);
-	mpc_NEGATE(x3,t1);
-	mpc_OR(t0,t1,z,randomness,randCount,views,countY);
+	mpc_NEGATE(x3,t0);
+	mpc_OR(x2,t0,t1,randomness,randCount,views,countY);
+	mpc_XOR(t1,x1,z);
 }
 
 void mpc_FF(uint32_t a[3], uint32_t b[3], uint32_t c[3], uint32_t d[3], uint32_t e[3], uint32_t x[3], uint32_t s, unsigned char * randomness[3], int * randCount, View views[3], int* countY) 
@@ -377,33 +379,43 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 
 	int chars = numBits >> 3;
 	unsigned char* chunks[3];
-	uint32_t X[3][16];
+	uint32_t X[16][3];
 	uint32_t buf[5][3] = {{ hA[0],hA[0],hA[0] },
 				{hA[1],hA[1],hA[1]},
 				{hA[2],hA[2],hA[2]},
 				{hA[3],hA[3],hA[3]},
 				{hA[4],hA[4],hA[4]}};
 
-	memset(buf,0,16*4*3);
+	memset(X,0,16*4*3);
 	for (int i = 0; i < 3; i++) {
 		chunks[i] = calloc(64, 1); // 16 * 4 bytes 
 		memset(chunks[i],0,64);
 		memcpy(chunks[i], inputs[i], chars);
 		chunks[i][chars] = 0x80;
+		chunks[i][56] = numBits ;
+		chunks[i][57] = numBits >> 8;
+		chunks[i][58] = numBits >> 16;
+		chunks[i][59] = numBits >> 24;
 
-		for (int j = 0; j < 14; j++) {
-			X[i][j] = ((uint32_t)chunks[i][j * 4 + 0] << 0) | ((uint32_t)chunks[i][j * 4 + 1] << 8)
+		memcpy(views[i].x,chunks[i], 32);
+
+		for (int j = 0; j < 16; j++) {
+			X[j][i] = ((uint32_t)chunks[i][j * 4 + 0] << 0) | ((uint32_t)chunks[i][j * 4 + 1] << 8)
 				| ((uint32_t)chunks[i][j * 4 + 2] << 16) | ((uint32_t)chunks[i][j * 4 + 3] << 24);
 			
 		}
 		
-		X[i][14] = numBits;
-		X[i][15] = 0;
-
 
 		free(chunks[i]);
 
-		memcpy(views[i].x,X[i], 32);
+	}
+
+	if (debug)
+	{
+		printf("X ");
+		for (int j=0;j<16;j++)
+			printf("X[%d] = %02X, ",j,X[j][0]^X[j][1]^X[j][2]);
+		printf("\n");
 	}
 
 	uint32_t t0[3], t1[3];
@@ -436,6 +448,11 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_FF(bb, cc, dd, ee, aa, X[14], 9, randomness, randCount, views, countY);
 	mpc_FF(aa, bb, cc, dd, ee, X[15], 8, randomness, randCount, views, countY);
 
+	if (debug)
+	{
+		printf("round1 ");
+		printf("aa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aa[0]^aa[1]^aa[2],bb[0]^bb[1]^bb[2],cc[0]^cc[1]^cc[2],dd[0]^dd[1]^dd[2],ee[0]^ee[1]^ee[2]);
+	}
 	// round 2
 	mpc_GG(ee, aa, bb, cc, dd, X[7], 7, hG, randomness, randCount, views, countY);
 	mpc_GG(dd, ee, aa, bb, cc, X[4], 6, hG, randomness, randCount, views, countY);
@@ -454,6 +471,11 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_GG(aa, bb, cc, dd, ee, X[11], 13, hG, randomness, randCount, views, countY);
 	mpc_GG(ee, aa, bb, cc, dd, X[8], 12, hG, randomness, randCount, views, countY);
 
+	if (debug)
+	{
+		printf("round2 ");
+		printf("aa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aa[0]^aa[1]^aa[2],bb[0]^bb[1]^bb[2],cc[0]^cc[1]^cc[2],dd[0]^dd[1]^dd[2],ee[0]^ee[1]^ee[2]);
+	}
 	// round 3
 	mpc_HH(dd, ee, aa, bb, cc, X[3], 11, hH, randomness, randCount, views, countY);
 	mpc_HH(cc, dd, ee, aa, bb, X[10], 13, hH, randomness, randCount, views, countY);
@@ -471,6 +493,11 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_HH(aa, bb, cc, dd, ee, X[11], 12, hH, randomness, randCount, views, countY);
 	mpc_HH(ee, aa, bb, cc, dd, X[5], 7, hH, randomness, randCount, views, countY);
 	mpc_HH(dd, ee, aa, bb, cc, X[12], 5, hH, randomness, randCount, views, countY);
+	if (debug)
+	{
+		printf("round3 ");
+		printf("aa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aa[0]^aa[1]^aa[2],bb[0]^bb[1]^bb[2],cc[0]^cc[1]^cc[2],dd[0]^dd[1]^dd[2],ee[0]^ee[1]^ee[2]);
+	}
 
 	// round 4
 	mpc_II(cc, dd, ee, aa, bb, X[1], 11, hI, randomness, randCount, views, countY);
@@ -508,6 +535,11 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_JJ(cc, dd, ee, aa, bb, X[15], 5, hJ, randomness, randCount, views, countY);
 	mpc_JJ(bb, cc, dd, ee, aa, X[13], 6, hJ, randomness, randCount, views, countY);
 
+	if (debug)
+	{
+		printf("round5 ");
+		printf("aa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aa[0]^aa[1]^aa[2],bb[0]^bb[1]^bb[2],cc[0]^cc[1]^cc[2],dd[0]^dd[1]^dd[2],ee[0]^ee[1]^ee[2]);
+	}
 	// round 1
 	mpc_JJ(aaa, bbb, ccc, ddd, eee, X[5], 8, hJJ, randomness, randCount, views, countY);
        	mpc_JJ(eee, aaa, bbb, ccc, ddd, X[14], 9, hJJ, randomness, randCount, views, countY);
@@ -525,6 +557,12 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_JJ(ccc, ddd, eee, aaa, bbb, X[10], 14, hJJ, randomness, randCount, views, countY);
 	mpc_JJ(bbb, ccc, ddd, eee, aaa, X[3], 12, hJJ, randomness, randCount, views, countY);
 	mpc_JJ(aaa, bbb, ccc, ddd, eee, X[12], 6, hJJ, randomness, randCount, views, countY);
+
+	if (debug)
+	{
+		printf("alt round1 ");
+		printf("aaa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aaa[0]^aaa[1]^aaa[2],bbb[0]^bbb[1]^bbb[2],ccc[0]^ccc[1]^ccc[2],ddd[0]^ddd[1]^ddd[2],eee[0]^eee[1]^eee[2]);
+	}
 
 	// round 2
 	mpc_II(eee, aaa, bbb, ccc, ddd, X[6], 9, hII, randomness, randCount, views, countY);
@@ -598,6 +636,12 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_FF(ccc, ddd, eee, aaa, bbb, X[9], 11, randomness, randCount, views, countY);
 	mpc_FF(bbb, ccc, ddd, eee, aaa, X[11], 11, randomness, randCount, views, countY);
 
+	if (debug)
+	{
+		printf("alt round5 ");
+		printf("aaa = %02X, bb = %02X, cc = %02X, dd = %02X, ee = %02X\n ",aaa[0]^aaa[1]^aaa[2],bbb[0]^bbb[1]^bbb[2],ccc[0]^ccc[1]^ccc[2],ddd[0]^ddd[1]^ddd[2],eee[0]^eee[1]^eee[2]);
+	}
+
 	mpc_ADD(cc,buf[1],t0,randomness,randCount,views,countY);
 	mpc_ADD(t0,ddd,t1,randomness,randCount,views,countY);
 	mpc_ADD(dd,buf[2],t0,randomness,randCount,views,countY);
@@ -608,10 +652,17 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 	mpc_ADD(t0,bbb,buf[3],randomness,randCount,views,countY);
 	mpc_ADD(bb,buf[0],t0,randomness,randCount,views,countY);
 	mpc_ADD(t0,ccc,buf[4],randomness,randCount,views,countY);
-	buf[0][0] = ddd[0];
-	buf[0][1] = ddd[1];
-	buf[0][2] = ddd[2];
+	buf[0][0] = t1[0];
+	buf[0][1] = t1[1];
+	buf[0][2] = t1[2];
 
+	if (debug)
+	{
+		printf("end ");
+		for (int j=0;j<5;j++)
+			printf("buf[%d] = %02X,",j,buf[j][0]^buf[j][1]^buf[j][2]);
+		printf("\n");
+	}
 
 	for (int i = 0; i < 5; i++) {
 		results[0][i * 4] = buf[i][0];
