@@ -260,7 +260,7 @@ void mpc_H(uint32_t x1[3], uint32_t x2[3], uint32_t x3[3], uint32_t z[3], unsign
 }
 
 
-void mpc_IQ(uint32_t x1[3], uint32_t x2[3], uint32_t x3[3], uint32_t z[3], unsigned char * randomness[3], int * randCount, View views[3], int* countY) {
+void mpc_I(uint32_t x1[3], uint32_t x2[3], uint32_t x3[3], uint32_t z[3], unsigned char * randomness[3], int * randCount, View views[3], int* countY) {
 	uint32_t t0[3] = { 0 };
 	uint32_t t1[3] = { 0 };
 	uint32_t t2[3] = { 0 };
@@ -340,7 +340,7 @@ void mpc_II(uint32_t a[3], uint32_t b[3], uint32_t c[3], uint32_t d[3], uint32_t
 	uint32_t t3[3] = { 0 };
 	uint32_t t4[3] = { 0 };
 
-	mpc_IQ(b,c,d,t0,randomness,randCount,views,countY);
+	mpc_I(b,c,d,t0,randomness,randCount,views,countY);
 	mpc_ADD(t0,x,t1,randomness,randCount,views,countY);
 	mpc_ADDK(t1,C,t2,randomness,randCount,views,countY);
 	mpc_ADD(t2,a,t3,randomness,randCount,views,countY);
@@ -397,7 +397,7 @@ int mpc_ripemd160(unsigned char* results[3], unsigned char* inputs[3], int numBi
 		chunks[i][58] = numBits >> 16;
 		chunks[i][59] = numBits >> 24;
 
-		memcpy(views[i].x,chunks[i], 32);
+		memcpy(views[i].x,chunks[i], 64);
 
 		for (int j = 0; j < 16; j++) {
 			X[j][i] = ((uint32_t)chunks[i][j * 4 + 0] << 0) | ((uint32_t)chunks[i][j * 4 + 1] << 8)
