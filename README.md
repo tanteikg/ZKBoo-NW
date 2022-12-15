@@ -8,8 +8,7 @@ This was improved on by [ZKB++](https://eprint.iacr.org/2017/279.pdf), an improv
 
 # Dec 2022. Author: Tan Teik Guan  
 
-Extended the ZKBoo implementation with more MPC-in-the-head implementations for SHA512 and RIPEMD160.
+Extended the ZKBoo implementation with more MPC-in-the-head implementations for SHA512 and RIPEMD160. We hope to use this as a reference for more post-quantum solutions in the future. 
 
-We hope to use this as a reference for more post-quantum solutions in the future. 
-
+First use-case is "MPC_ADDRESS": Proof of address ownership without revealing public key 
 
