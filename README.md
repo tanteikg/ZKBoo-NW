@@ -6,7 +6,9 @@ When starting either prover, it will prompt for an input to hash. After entering
 
 This was improved on by [ZKB++](https://eprint.iacr.org/2017/279.pdf), an improved version of ZKBOO with NIZK proofs that are less than half the size of ZKBOO proofs. Moreover, benchmarks show that this size reduction comes at no extra computational cost.
 
-# Dec 2022. Author: Tan Teik Guan  
+# Dec 2022. 
+
+Author: Tan Teik Guan  
 
 Extended the ZKBoo implementation with more MPC-in-the-head implementations for SHA512 and RIPEMD160. We hope to use this as a reference for more post-quantum solutions in the future. 
 
