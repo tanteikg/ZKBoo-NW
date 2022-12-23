@@ -55,7 +55,7 @@ int totalHash = 0;
 int NUM_ROUNDS = 1;
 
 
-int debug = 0;
+int debug = 1;
 
 uint32_t rand32() {
 	uint32_t x;
@@ -414,6 +414,7 @@ int mpc_write256(MP_INT val256[3], View views[3], int * countY)
 		views[0].y[*countY] = buf[0][i];
 		views[1].y[*countY] = buf[1][i];
 		views[2].y[*countY] = buf[2][i];
+		*countY = *countY + 1;
 	}
 	return 0;
 }
@@ -421,9 +422,9 @@ int mpc_write256(MP_INT val256[3], View views[3], int * countY)
 int mpc_ADD_EC(MP_INT x1[3], MP_INT y1[3], MP_INT x2[3], MP_INT y2[3], unsigned char * randomness[3], int * randCount, View views[3], int * countY)
 {
 
-	ecAddPoint(&x1[0],&y1[0],&x2[1],&y1[1]);
-	ecAddPoint(&x1[1],&y1[1],&x2[2],&y1[2]);
-	ecAddPoint(&x1[2],&y1[2],&x2[0],&y1[0]);
+	ecAddPoint(&x1[0],&y1[0],&x2[1],&y2[1]);
+	ecAddPoint(&x1[1],&y1[1],&x2[2],&y2[2]);
+	ecAddPoint(&x1[2],&y1[2],&x2[0],&y2[0]);
 
 	mpc_write256(x1,views,countY);
 	mpc_write256(y1,views,countY);
@@ -439,7 +440,20 @@ int mpc_MUL_EC(unsigned char * Prodx[3], unsigned char * Prody[3], unsigned char
 	MP_INT x1[3],y1[3];
 	MP_INT multiple[3];
 	MP_INT mod;
+	unsigned char tempkey[32];
+	MP_INT priv;
 
+	for (j=0;j<32;j++)
+		tempkey[j]=privkey[0][j]^privkey[1][j]^privkey[2][j];
+	mpz_init(&priv);
+	mpz_import(&priv,32,1,1,0,0,tempkey);
+	if (debug)
+	{
+		printf("private key:");
+		mpz_out_str(stdout,16,&priv);
+		printf("\n");
+	}
+	memset(tempkey,0,32);
 	mpz_init_set_str(&mod,CURVE_N,16);
 	for (j=0;j<3;j++)
 	{
@@ -452,8 +466,13 @@ int mpc_MUL_EC(unsigned char * Prodx[3], unsigned char * Prody[3], unsigned char
 		mpz_init_set_ui(&x1[j],0);
 		mpz_init_set_ui(&y1[j],0);
 	}
-
-	//mpc_write256(multiple,views,countY);
+        // need to adjust multiple[2] to be mod N
+	mpz_mod(&multiple[0],&multiple[0],&mod);
+	mpz_mod(&multiple[1],&multiple[1],&mod);
+	mpz_add(&multiple[2],&multiple[0],&multiple[1]);
+	mpz_sub(&multiple[2],&priv,&multiple[2]);
+	mpz_mod(&multiple[2],&multiple[2],&mod);
+	mpc_write256(multiple,views,countY);
 
 	for (k = 0; k < 4; k++)
 	{
@@ -480,6 +499,30 @@ int mpc_MUL_EC(unsigned char * Prodx[3], unsigned char * Prody[3], unsigned char
 				i[j]>>=1;
 			}
                         mpc_ADD_EC(x1,y1,tx,ty,randomness,randCount,views,countY);
+			if (debug)
+			{
+				int tt;
+				printf("loop %ld:\n",(k*64)+loop);
+				for (tt = 0; tt< 3;tt++)
+				{
+					printf("x %d:",tt);
+					mpz_out_str(stdout,16,&x1[tt]);
+					printf("\n");
+					printf("y %d:",tt);
+					mpz_out_str(stdout,16,&y1[tt]);
+					printf("\n");
+				}
+				for (tt = 0; tt< 3;tt++)
+				{
+					printf("tempx %d:",tt);
+					mpz_out_str(stdout,16,&tx[tt]);
+					printf("\n");
+					printf("tempy %d:",tt);
+					mpz_out_str(stdout,16,&ty[tt]);
+					printf("\n");
+				}
+			}
+
 			ecAddPoint(&x[0],&y[0],&x[0],&y[0]);
 			ecAddPoint(&x[1],&y[1],&x[1],&y[1]);
 			ecAddPoint(&x[2],&y[2],&x[2],&y[2]);
@@ -517,6 +560,7 @@ int mpc_MUL_EC(unsigned char * Prodx[3], unsigned char * Prody[3], unsigned char
 	}
 
 	mpz_clear(&mod);
+	mpz_clear(&priv);
 	return 0;
 
 }
@@ -1012,24 +1056,53 @@ static int printonce=0;
 	hashes[1] = malloc(20);
 	hashes[2] = malloc(20);
 	unsigned char * pubkey[3];
+	unsigned char * pubx[3];
 	unsigned char * puby[3];
-	pubkey[0] = malloc(64);
-	pubkey[1] = malloc(64);
-	pubkey[2] = malloc(64);
-	int pubkeylen = 32;
+	pubkey[0] = malloc(65);
+	pubkey[1] = malloc(65);
+	pubkey[2] = malloc(65);
+	int pubkeylen = 33;
+	pubx[0] = malloc(32);
+	pubx[1] = malloc(32);
+	pubx[2] = malloc(32);
 	puby[0] = malloc(32);
 	puby[1] = malloc(32);
 	puby[2] = malloc(32);
 	int randCount = 0;
 
 	int* countY = calloc(1, sizeof(int));
-	mpc_MUL_EC(pubkey,puby,inputs, randomness, &randCount, views, countY);
+	mpc_MUL_EC(pubx,puby,inputs, randomness, &randCount, views, countY);
+
+	pubkey[0][0] = 0x02;
+	pubkey[1][0] = 0x02;
+	pubkey[2][0] = 0x02;
+	memcpy(&(pubkey[0][1]),pubx[0],32);
+	memcpy(&(pubkey[1][1]),pubx[1],32);
+	memcpy(&(pubkey[2][1]),pubx[2],32);
 	if (!compressed)
 	{
-		pubkeylen = 32;
-		memcpy(&pubkey[0][32],puby[0],32);
-		memcpy(&pubkey[1][32],puby[1],32);
-		memcpy(&pubkey[2][32],puby[2],32);
+		pubkeylen = 65;
+		pubkey[0][0] = 0x04;
+		pubkey[1][0] = 0x04;
+		pubkey[2][0] = 0x04;
+		memcpy(&pubkey[0][33],puby[0],32);
+		memcpy(&pubkey[1][33],puby[1],32);
+		memcpy(&pubkey[2][33],puby[2],32);
+	}
+	if (debug)
+	{
+		printf("pubx: ");
+		for (int k = 0; k < pubkeylen; k++)
+		{
+			printf("%02X %02X %02X",pubx[0][k], pubx[1][k],pubx[2][k]);
+		}
+		printf("\n");
+		printf("pubkey: ");
+		for (int k = 0; k < pubkeylen; k++)
+		{
+			printf("%02X",pubkey[0][k]^pubkey[1][k]^pubkey[2][k]);
+		}
+		printf("\n");
 	}
 	mpc_sha256(shahashes, pubkey, pubkeylen * 8, randomness, &randCount, views, countY);
 	mpc_ripemd160(hashes, shahashes, 32 * 8, randomness, &randCount, views, countY);
@@ -1056,7 +1129,8 @@ static int printonce=0;
 
 		*countY += 1;
 	}
-//printf("countY %d randcount %d\n",*countY,randCount);
+	if (debug)
+		printf("countY %d randcount %d\n",*countY,randCount);
 	free(countY);
 	free(shahashes[0]);
 	free(shahashes[1]);
@@ -1067,6 +1141,9 @@ static int printonce=0;
 	free(pubkey[0]);
 	free(pubkey[1]);
 	free(pubkey[2]);
+	free(pubx[0]);
+	free(pubx[1]);
+	free(pubx[2]);
 	free(puby[0]);
 	free(puby[1]);
 	free(puby[2]);
@@ -1335,7 +1412,7 @@ int main(int argc, char * argv[])
 
 
 	keybuflen = 32;
-	unsigned char input[i];
+	unsigned char input[keybuflen];
 	for(int j = 0; j<keybuflen; j++) {
 		input[j] = keybuf[j+1];
 	}
@@ -1358,15 +1435,14 @@ int main(int argc, char * argv[])
 	
 
 	//Sharing secrets
-	unsigned char shares[NUM_ROUNDS][3][i];
+	unsigned char shares[NUM_ROUNDS][3][keybuflen];
 	if(RAND_bytes((unsigned char *)shares, NUM_ROUNDS*3*i) != 1) {
 		printf("RAND_bytes failed crypto, aborting\n");
 		return 0;
 	}
 	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
-
-		for (int j = 0; j < i; j++) {
+		for (int j = 0; j < keybuflen; j++) {
 			shares[k][2][j] = input[j] ^ shares[k][0][j] ^ shares[k][1][j];
 		}
 
