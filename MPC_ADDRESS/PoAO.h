@@ -40,6 +40,11 @@
 #define POAO_H_
 
 #define VERBOSE 1 
+
+#ifdef WASM
+#include <emscripten.h>
+#endif
+
 /*
 // secp256r1 or prime256v1 parameters
 #define CURVE_P "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF"

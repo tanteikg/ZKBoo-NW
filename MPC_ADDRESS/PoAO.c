@@ -319,13 +319,13 @@ static int getRandom256(unsigned char * randomness, int randCount, unsigned char
 }
 
 
-static void H(unsigned char k[16], View v, unsigned char r[4], unsigned char hash[RIPEMD160_DIGEST_LENGTH]) {
+static void H(unsigned char k[16], View *v, unsigned char r[4], unsigned char hash[RIPEMD160_DIGEST_LENGTH]) {
 	SHA256_CTX ctx;
 	unsigned char shahash[SHA256_DIGEST_LENGTH];
 
 	sha256_init(&ctx);
 	sha256_update(&ctx, k, 16);
-	sha256_update(&ctx, (unsigned char *) &v, sizeof(v));
+	sha256_update(&ctx, (unsigned char *) v, sizeof(View));
 	sha256_update(&ctx, r, 4);
 	sha256_final(&ctx, shahash);
 
@@ -692,26 +692,26 @@ static void mpc_RIGHTSHIFT(uint32_t x[3], int i, uint32_t z[3]) {
 	z[2] = x[2] >> i;
 }
 
-static int mpc_verify(a a, int e, z z) {
+static int mpc_verify(a as, int e, z z) {
 	unsigned char* hash = malloc(RIPEMD160_DIGEST_LENGTH);
-	H(z.ke, z.ve, z.re, hash);
-	if (memcmp(a.h[e], hash, 20) != 0) {
+	H(z.ke, &z.ve, z.re, hash);
+	if (memcmp(as.h[e], hash, 20) != 0) {
 		return 1;
 	}
-	H(z.ke1, z.ve1, z.re1, hash);
-	if (memcmp(a.h[(e + 1) % 3], hash, 20) != 0) {
+	H(z.ke1, &z.ve1, z.re1, hash);
+	if (memcmp(as.h[(e + 1) % 3], hash, 20) != 0) {
 		return 1;
 	}
 	free(hash);
 
 	uint32_t* result = malloc(20);
 	output(z.ve, result);
-	if (memcmp(a.yp[e], result, 20) != 0) {
+	if (memcmp(as.yp[e], result, 20) != 0) {
 		return 1;
 	}
 
 	output(z.ve1, result);
-	if (memcmp(a.yp[(e + 1) % 3], result, 20) != 0) {
+	if (memcmp(as.yp[(e + 1) % 3], result, 20) != 0) {
 		return 1;
 	}
 
@@ -722,7 +722,6 @@ static int mpc_verify(a a, int e, z z) {
 
 	int* randCount = calloc(1, sizeof(int));
 	int* countY = calloc(1, sizeof(int));
-
 	uint32_t w[64][2];
 	for (int j = 0; j < 16; j++) {
 		w[j][0] = (z.ve.x[j * 4] << 24) | (z.ve.x[j * 4 + 1] << 16)
@@ -2305,7 +2304,7 @@ static int secretShare(unsigned char* input, int numBytes, unsigned char output[
 	return 0;
 }
 
-static a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomness[3], unsigned char rs[3][4], View views[3]) {
+static a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomness[3], unsigned char rs[3][4], View views[3], unsigned char hashresult[RIPEMD160_DIGEST_LENGTH]) {
 static int printonce=0;
 
 	unsigned char* inputs[3];
@@ -2392,16 +2391,20 @@ static int printonce=0;
 
 	mpc_ripemd160(hashes, shahashes, SHA256_DIGEST_LENGTH * 8, randomness, &randCount, views, countY);
 
-	if (debug)
 	if (!printonce) // just for debug
 	{
 		printonce=1;
-		printf("hash obtained is: ");
 		for (int i = 0; i < 20; i++)
+			hashresult[i] = hashes[0][i]^hashes[1][i]^hashes[2][i];
+		if (debug)
 		{
-			printf("%02X",hashes[0][i]^hashes[1][i]^hashes[2][i]);
+			printf("hash obtained is: ");
+			for (int i = 0; i < 20; i++)
+			{
+				printf("%02X",hashresult[i]);
+			}
+			printf("\n");
 		}
-		printf("\n");
 	}
 
 	//Explicitly add y to view
@@ -2454,16 +2457,15 @@ static int printonce=0;
 	return a;
 }
 
-static z prove(int e, unsigned char keys[3][16], unsigned char rs[3][4], View views[3]) {
-	z z;
-	memcpy(z.ke, keys[e], 16);
-	memcpy(z.ke1, keys[(e + 1) % 3], 16);
-	z.ve = views[e];
-	z.ve1 = views[(e + 1) % 3];
-	memcpy(z.re, rs[e],4);
-	memcpy(z.re1, rs[(e + 1) % 3],4);
+static void prove(z *zs, int e, unsigned char keys[3][16], unsigned char rs[3][4], View views[3]) {
 
-	return z;
+	memcpy(zs->ke, keys[e], 16);
+	memcpy(zs->ke1, keys[(e + 1) % 3], 16);
+	memcpy(&(zs->ve),&views[e],sizeof(View));
+	memcpy(&(zs->ve1),&views[(e + 1) % 3],sizeof(View));
+	memcpy(zs->re, rs[e],4);
+	memcpy(zs->re1, rs[(e + 1) % 3],4);
+
 }
 
 
@@ -2644,7 +2646,6 @@ static void hex2bin(char * hex , int hexsize, unsigned char * bin)
 			tempc += hex[i+1] - 'A' + 10;
 		bin[(i)/2] = tempc; 
 	}
-
 }
 static void bin2hex(unsigned char * bin, int binsize, char * hex)
 {
@@ -2663,7 +2664,9 @@ static void bin2hex(unsigned char * bin, int binsize, char * hex)
 }
 
 // generate - create proof from public key
-//EMSCRIPTEN_KEEPALIVE
+#ifdef WASM
+EMSCRIPTEN_KEEPALIVE
+#endif
 char * generate_poc(char * message, char * secret, char * params)
 {
 	int KEY_LEN = strlen(secret)/2;
@@ -2679,7 +2682,7 @@ char * generate_poc(char * message, char * secret, char * params)
 	unsigned char *randomness[NUM_ROUNDS][3];
 	char * proof;
 	SHA256_CTX shactx;
-	char addrstr[200];
+	char  addrstr[200];
 	unsigned long int addrstrlen;
 
 	srand((unsigned) time(NULL));
@@ -2689,6 +2692,9 @@ char * generate_poc(char * message, char * secret, char * params)
 	}
 	hex2bin(secret,strlen(secret),pubkey);
 	
+	if (debug)
+		printf("secret is [%s]\n",secret);
+
 	//Generating keys
 	if(RAND_bytes((unsigned char *)keys, NUM_ROUNDS*3*16) != 1) {
 		printf("RAND_bytes failed crypto, aborting");
@@ -2719,8 +2725,9 @@ char * generate_poc(char * message, char * secret, char * params)
 		}
 	}
 
+	uint8_t ripehash[20];
 	for(int k=0; k<NUM_ROUNDS; k++) {
-		as[k] = commit(KEY_LEN, shares[k], randomness[k], rs[k], localViews[k]);
+		as[k] = commit(KEY_LEN, shares[k], randomness[k], rs[k], localViews[k],ripehash);
 		for(int j=0; j<3; j++) {
 			free(randomness[k][j]);
 		}
@@ -2728,11 +2735,11 @@ char * generate_poc(char * message, char * secret, char * params)
 
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		unsigned char hash1[RIPEMD160_DIGEST_LENGTH];
-		H(keys[k][0], localViews[k][0], rs[k][0], hash1);
+		H(keys[k][0], &localViews[k][0], rs[k][0], hash1);
 		memcpy(as[k].h[0], &hash1, 20);
-		H(keys[k][1], localViews[k][1], rs[k][1], hash1);
+		H(keys[k][1], &localViews[k][1], rs[k][1], hash1);
 		memcpy(as[k].h[1], &hash1, 20);
-		H(keys[k][2], localViews[k][2], rs[k][2], hash1);
+		H(keys[k][2], &localViews[k][2], rs[k][2], hash1);
 		memcpy(as[k].h[2], hash1, 20);
 	}
 
@@ -2749,26 +2756,28 @@ char * generate_poc(char * message, char * secret, char * params)
 	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
 
 	for(int i = 0; i<NUM_ROUNDS; i++) {
-		zs[i] = prove(es[i],keys[i],rs[i], localViews[i]);
+		prove(&zs[i],es[i],keys[i],rs[i], localViews[i]);
 	}
 
-
-	uint32_t ripehash[3][20];
 	uint32_t combined[5];
 	unsigned char shahash[32];
+	/*
 	output(localViews[0][0],(uint32_t*)ripehash[0]);	
 	output(localViews[0][1],(uint32_t*)ripehash[1]);	
 	output(localViews[0][2],(uint32_t*)ripehash[2]);	
 	reconstruct(ripehash[0],ripehash[1],ripehash[2],combined);
+	*/
 
 	proof = malloc(P_SIZE);
+	memset(proof,0,P_SIZE);
 	bin2hex((unsigned char *)as,sizeof(a)*NUM_ROUNDS,proof);
-	bin2hex((unsigned char *)zs,sizeof(z)*NUM_ROUNDS,proof+sizeof(a)*NUM_ROUNDS*2);
+	bin2hex((unsigned char *)zs,sizeof(z)*NUM_ROUNDS,proof+(sizeof(a)*NUM_ROUNDS*2));
 	free(zs);
 
 	addrbuf[0] = 0;
 	hex2bin(params,2,&(addrbuf[0]));
-
+	memcpy(&addrbuf[1],ripehash,20);
+	/*
 	for (int i=0;i<5;i++)
 	{
 		addrbuf[1+i*4] = combined[i]>>24;
@@ -2776,7 +2785,7 @@ char * generate_poc(char * message, char * secret, char * params)
 		addrbuf[1+i*4+2] = combined[i]>>8;
 		addrbuf[1+i*4+3] = combined[i]>>0;
 	}
-
+	*/
 	sha256_init(&shactx);
 	sha256_update(&shactx,addrbuf,21);
 	sha256_final(&shactx,shahash);
@@ -2786,8 +2795,8 @@ char * generate_poc(char * message, char * secret, char * params)
 
 	memcpy(&(addrbuf[21]),shahash,4);
 
-	addrstrlen = sizeof(addrstr);
-	memset(addrstr,0,sizeof(addrstr));
+	addrstrlen = 200;
+	memset(addrstr,0,addrstrlen);
 	if (!b58enc(addrstr, &addrstrlen, addrbuf, 25)) 
 	{
 		printf("b58enc error\n");
@@ -2796,19 +2805,20 @@ char * generate_poc(char * message, char * secret, char * params)
 
 	if (debug)
 		printf("address: %s\n",addrstr);
-
 	return proof;
 
 }
 
 
-
 // verify - verify proof from public key
+#ifdef WASM
+EMSCRIPTEN_KEEPALIVE
+#endif
 char * verify_poc(char * message, char * proof, char * params)
 {
 	char * ret = malloc(1000);
 	a as[NUM_ROUNDS];
-	z zs[NUM_ROUNDS];
+	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
 	int es[NUM_ROUNDS];
 	uint32_t y[5];
 	int i;
@@ -2819,8 +2829,18 @@ char * verify_poc(char * message, char * proof, char * params)
 	unsigned char shahash[SHA256_DIGEST_LENGTH];
 	int passed = 1;
 
+	if (debug)
+	{
+		printf("proof received [%s]\n",proof);
+		printf("Length of proof received = %ld, expected %ld\n",strlen(proof),(sizeof(a)+sizeof(z))*NUM_ROUNDS*2);
+	}
+	if (strlen(proof)<((sizeof(a)+sizeof(z))*NUM_ROUNDS*2))
+	{
+		printf("Incorrect proof length\n");
+		return NULL;
+	}
 	hex2bin(proof,sizeof(a)*NUM_ROUNDS*2,(unsigned char *)as);
-	hex2bin(&(proof[sizeof(a)*NUM_ROUNDS*2]),sizeof(zs)*NUM_ROUNDS*2,(unsigned char *)zs);
+	hex2bin(&(proof[sizeof(a)*NUM_ROUNDS*2]),sizeof(z)*NUM_ROUNDS*2,(unsigned char *)zs);
 	reconstruct(as[0].yp[0],as[0].yp[1],as[0].yp[2],y);
 	if (debug)
 	{
@@ -2839,6 +2859,7 @@ char * verify_poc(char * message, char * proof, char * params)
 			passed = 0;
 		}	
 	}
+	free(zs);
 	if (!passed)
 	{
 		printf("verification failed\n");
@@ -2883,12 +2904,16 @@ char * verify_poc(char * message, char * proof, char * params)
 	}
 }
 
+#ifdef WASM
+EMSCRIPTEN_KEEPALIVE
+#endif
 void clearbuf(char * ret)
 {
 	if (ret)
 		free(ret);
 }
 
+#ifndef WASM
 int main(int argc, char * argv[])
 {
 	char * rc;
@@ -2921,4 +2946,4 @@ int main(int argc, char * argv[])
 	return -1;
 
 }
-
+#endif
