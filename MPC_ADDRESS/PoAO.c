@@ -282,8 +282,8 @@ static void getAllRandomness(unsigned char key[16], unsigned char randomness[rSi
 	unsigned char hashbuf[SHA256_BLOCK_SIZE];
 	int len;
 	sha256_init(&ctx);
-	sha256_update(&ctx,iv,strlen(iv));
-	sha256_update(&ctx,plaintext,strlen(plaintext));
+	sha256_update(&ctx,iv,strlen((char *)iv));
+	sha256_update(&ctx,plaintext,strlen((char *)plaintext));
 	sha256_update(&ctx,key,16);
 	sha256_final(&ctx,hashbuf);
 	for(int j=0;j<(rSize/16);j++) {
@@ -340,13 +340,17 @@ static void H3(char * msg, uint32_t y[5], a* as, int s, int* es) {
 	SHA256_CTX ctx;
 
 	sha256_init(&ctx);
-	sha256_update(&ctx, msg, strlen(msg));
-	sha256_update(&ctx, (unsigned char *)y, 32);
+	sha256_update(&ctx, (unsigned char *)msg, strlen(msg));
+	sha256_update(&ctx, (unsigned char *)y, 20);
 	sha256_update(&ctx, (unsigned char *)as, sizeof(a)*s);
 	sha256_final(&ctx, shahash);
 	
 	ripemd160(shahash,SHA256_DIGEST_LENGTH,hash);
 
+	if (debug)
+	{
+		printf("hash3 is [%02x %02x %02x]\n",hash[0],hash[1],hash[2]);
+	}
 	//Pick bits from hash
 	int i = 0;
 	int bitTracker = 0;
@@ -404,49 +408,49 @@ static void mpc_NEGATE2(uint32_t x[2], uint32_t z[2]) {
 	z[1] = ~x[1];
 }
 
-static int mpc_AND_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
+static int mpc_AND_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View* ve, View* ve1, unsigned char *randomness[2], int* randCount, int* countY) {
 	uint32_t r[2] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount) };
 	*randCount += 4;
 
 	uint32_t t = 0;
 
 	t = (x[0] & y[1]) ^ (x[1] & y[0]) ^ (x[0] & y[0]) ^ r[0] ^ r[1];
-	if(ve.y[*countY] != t) {
+	if(ve->y[*countY] != t) {
 		return 1;
 	}
 	z[0] = t;
-	z[1] = ve1.y[*countY];
+	z[1] = ve1->y[*countY];
 
-	(*countY)++;
+	*countY += 1;
 	return 0;
 }
 
 
-static int mpc_ADD_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
+static int mpc_ADD_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View *ve, View* ve1, unsigned char *randomness[2], int* randCount, int* countY) {
 	uint32_t r[2] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount) };
 	*randCount += 4;
 
 	uint8_t a[2], b[2];
 
 	uint8_t t;
-
+	
 	for(int i=0;i<31;i++)
 	{
-		a[0]=GETBIT(x[0]^ve.y[*countY],i);
-		a[1]=GETBIT(x[1]^ve1.y[*countY],i);
+		a[0]=GETBIT(x[0]^ve->y[*countY],i);
+		a[1]=GETBIT(x[1]^ve1->y[*countY],i);
 
-		b[0]=GETBIT(y[0]^ve.y[*countY],i);
-		b[1]=GETBIT(y[1]^ve1.y[*countY],i);
+		b[0]=GETBIT(y[0]^ve->y[*countY],i);
+		b[1]=GETBIT(y[1]^ve1->y[*countY],i);
 
 		t = (a[0]&b[1]) ^ (a[1]&b[0]) ^ GETBIT(r[1],i);
-		if(GETBIT(ve.y[*countY],i+1) != (t ^ (a[0]&b[0]) ^ GETBIT(ve.y[*countY],i) ^ GETBIT(r[0],i))) {
+		if(GETBIT(ve->y[*countY],i+1) != (t ^ (a[0]&b[0]) ^ GETBIT(ve->y[*countY],i) ^ GETBIT(r[0],i))) {
 			return 1;
 		}
 	}
 
-	z[0]=x[0]^y[0]^ve.y[*countY];
-	z[1]=x[1]^y[1]^ve1.y[*countY];
-	(*countY)++;
+	z[0]=x[0]^y[0]^ve->y[*countY];
+	z[1]=x[1]^y[1]^ve1->y[*countY];
+	*countY +=1;
 	return 0;
 }
 
@@ -465,7 +469,7 @@ static void mpc_RIGHTSHIFT2(uint32_t x[2], int i, uint32_t z[2]) {
 	z[1] = x[1] >> i;
 }
 
-static int mpc_OR_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) 
+static int mpc_OR_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View *ve, View *ve1, unsigned char * randomness[2], int* randCount, int* countY) 
 {
 	uint32_t t0[3];
 	uint32_t t1[3];
@@ -481,7 +485,7 @@ static int mpc_OR_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View ve, V
 	return 0;
 }
 
-static int mpc_MAJ_verify(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t z[3], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
+static int mpc_MAJ_verify(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t z[3], View * ve, View* ve1, unsigned char * randomness[2], int* randCount, int* countY) {
 	uint32_t t0[3];
 	uint32_t t1[3];
 
@@ -494,7 +498,7 @@ static int mpc_MAJ_verify(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t 
 	return 0;
 }
 
-static int mpc_CH_verify(uint32_t e[2], uint32_t f[2], uint32_t g[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
+static int mpc_CH_verify(uint32_t e[2], uint32_t f[2], uint32_t g[2], uint32_t z[2], View * ve, View *ve1, unsigned char * randomness[2], int* randCount, int* countY) {
 	uint32_t t0[3];
 
 	mpc_XOR2(f,g,t0);
@@ -515,7 +519,7 @@ static void mpc_F2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2]
 	mpc_XOR2(t0,x3,z);
 }
 
-static int mpc_G2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY) {
+static int mpc_G2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View *ve, View* ve1, unsigned char * randomness[2], int * randCount, int* countY) {
 	uint32_t t0[2] = { 0 };
 	uint32_t t1[2] = { 0 };
 	uint32_t t2[2] = { 0 };
@@ -530,7 +534,7 @@ static int mpc_G2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2],
 	return 0;
 }
 
-static int mpc_H2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY) {
+static int mpc_H2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View *ve, View* ve1, unsigned char * randomness[2], int * randCount, int* countY) {
 	uint32_t t0[2] = { 0 };
 	uint32_t t1[2] = { 0 };
 
@@ -543,7 +547,7 @@ static int mpc_H2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2],
 }
 
 
-static int mpc_I2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY) {
+static int mpc_I2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View *ve, View* ve1, unsigned char *randomness[2], int * randCount, int* countY) {
 	uint32_t t0[2] = { 0 };
 	uint32_t t1[2] = { 0 };
 	uint32_t t2[2] = { 0 };
@@ -559,7 +563,7 @@ static int mpc_I2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2],
 }
 
 
-static int mpc_J2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY) {
+static int mpc_J2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2], View *ve, View* ve1, unsigned char * randomness[2], int * randCount, int* countY) {
 	uint32_t t0[2] = { 0 };
 	uint32_t t1[2] = { 0 };
 
@@ -570,7 +574,7 @@ static int mpc_J2(uint32_t x1[2], uint32_t x2[2], uint32_t x3[2], uint32_t z[2],
 	return 0;
 }
 
-static int mpc_FF2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY)
+static int mpc_FF2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, View *ve, View *ve1, unsigned char *randomness[2], int * randCount, int* countY)
 {
 	uint32_t t0[2] = { 0 };
 	uint32_t t1[2] = { 0 };
@@ -590,7 +594,7 @@ static int mpc_FF2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], u
 
 }
 
-static int mpc_GG2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY)
+static int mpc_GG2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View *ve, View* ve1, unsigned char *randomness[2], int * randCount, int* countY)
 {
 	uint32_t Cbuf[2] = {C,C};
 	uint32_t t0[2] = { 0 };
@@ -614,7 +618,7 @@ static int mpc_GG2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], u
 	return 0;
 }
 
-static int mpc_HH2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY)
+static int mpc_HH2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View *ve, View *ve1, unsigned char *randomness[2], int * randCount, int* countY)
 {
 	uint32_t Cbuf[2] = {C,C};
 	uint32_t t0[2] = { 0 };
@@ -638,7 +642,7 @@ static int mpc_HH2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], u
 	return 0;
 }
 
-static int mpc_II2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY)
+static int mpc_II2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View *ve, View *ve1, unsigned char *randomness[2], int * randCount, int* countY)
 {
 	uint32_t Cbuf[2] = {C,C};
 	uint32_t t0[2] = { 0 };
@@ -662,7 +666,7 @@ static int mpc_II2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], u
 	return 0;
 }
 
-static int mpc_JJ2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View ve, View ve1, unsigned char randomness[2][rSize], int * randCount, int* countY)
+static int mpc_JJ2(uint32_t a[2], uint32_t b[2], uint32_t c[2], uint32_t d[2], uint32_t e[2], uint32_t x[2], uint32_t s, uint32_t C, View *ve, View* ve1, unsigned char* randomness[2], int * randCount, int* countY)
 {
 	uint32_t Cbuf[2] = {C,C};
 	uint32_t t0[2] = { 0 };
@@ -692,48 +696,55 @@ static void mpc_RIGHTSHIFT(uint32_t x[3], int i, uint32_t z[3]) {
 	z[2] = x[2] >> i;
 }
 
-static int mpc_verify(a as, int e, z z) {
-	unsigned char* hash = malloc(RIPEMD160_DIGEST_LENGTH);
-	H(z.ke, &z.ve, z.re, hash);
-	if (memcmp(as.h[e], hash, 20) != 0) {
-		return 1;
-	}
-	H(z.ke1, &z.ve1, z.re1, hash);
-	if (memcmp(as.h[(e + 1) % 3], hash, 20) != 0) {
-		return 1;
-	}
-	free(hash);
+static int mpc_verify(a* as, int e, z * zp) {
+	int j;
+	unsigned char hash[RIPEMD160_DIGEST_LENGTH];
+	z zs;
 
-	uint32_t* result = malloc(20);
-	output(z.ve, result);
-	if (memcmp(as.yp[e], result, 20) != 0) {
+	memcpy(&zs,zp,sizeof(z));
+	H(zs.ke, &(zs.ve), zs.re, hash);
+
+	if (memcmp(as->h[e], hash, 20) != 0) {
 		return 1;
 	}
-
-	output(z.ve1, result);
-	if (memcmp(as.yp[(e + 1) % 3], result, 20) != 0) {
+	H(zs.ke1, &(zs.ve1), zs.re1, hash);
+	if (memcmp(as->h[(e + 1) % 3], hash, 20) != 0) {
 		return 1;
 	}
 
-	free(result);
-	unsigned char randomness[2][rSize];
-	getAllRandomness(z.ke, randomness[0]);
-	getAllRandomness(z.ke1, randomness[1]);
+	uint32_t result[5];
+	output(zs.ve, result);
+	if (memcmp(as->yp[e], result, 20) != 0) {
+		return 1;
+	}
 
-	int* randCount = calloc(1, sizeof(int));
-	int* countY = calloc(1, sizeof(int));
+	output(zs.ve1, result);
+	if (memcmp(as->yp[(e + 1) % 3], result, 20) != 0) {
+		return 1;
+	}
+	unsigned char* randomness[2];
+	randomness[0] = malloc(rSize);
+	randomness[1] = malloc(rSize);
+	getAllRandomness(zs.ke, randomness[0]);
+	getAllRandomness(zs.ke1, randomness[1]);
+
+	int *randCount =calloc(1,sizeof(int)) ;
+	int *countY = calloc(1,sizeof(int)) ;
+	*randCount = 0;
+	*countY = 0;
 	uint32_t w[64][2];
-	for (int j = 0; j < 16; j++) {
-		w[j][0] = (z.ve.x[j * 4] << 24) | (z.ve.x[j * 4 + 1] << 16)
-				| (z.ve.x[j * 4 + 2] << 8) | z.ve.x[j * 4 + 3];
-		w[j][1] = (z.ve1.x[j * 4] << 24) | (z.ve1.x[j * 4 + 1] << 16)
-				| (z.ve1.x[j * 4 + 2] << 8) | z.ve1.x[j * 4 + 3];
+
+	for (j = 0; j < 16; j++) {
+		w[j][0] = (zs.ve.x[j * 4] << 24) | (zs.ve.x[j * 4 + 1] << 16)
+				| (zs.ve.x[j * 4 + 2] << 8) | zs.ve.x[j * 4 + 3];
+		w[j][1] = (zs.ve1.x[j * 4] << 24) | (zs.ve1.x[j * 4 + 1] << 16)
+				| (zs.ve1.x[j * 4 + 2] << 8) | zs.ve1.x[j * 4 + 3];
 	}
 	uint32_t s0[2], s1[2];
 	uint32_t t0[2], t1[2];
-	for (int j = 16; j < 64; j++) 
+
+	for (j = 16; j < 64; j++) 
 	{
-		//s0[i] = RIGHTROTATE(w[i][j-15],7) ^ RIGHTROTATE(w[i][j-15],18) ^ (w[i][j-15] >> 3);
 		mpc_RIGHTROTATE2(w[j-15], 7, t0);
 		mpc_RIGHTROTATE2(w[j-15], 18, t1);
 		mpc_XOR2(t0, t1, t0);
@@ -747,19 +758,19 @@ static int mpc_verify(a as, int e, z z) {
 		mpc_RIGHTSHIFT2(w[j-2],10,t1);
 		mpc_XOR2(t0, t1, s1);
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
-
-		if(mpc_ADD_verify(w[j-16], s0, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(w[j-16], s0, t1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
  			return 1;
 		}
 
-		if(mpc_ADD_verify(w[j-7], t1, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(w[j-7], t1, t1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 			return 1;
 		}
-		if(mpc_ADD_verify(t1, s1, w[j], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(t1, s1, w[j], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 			return 1;
 		}
 
 	}
+
 	uint32_t va[2] = { hA[0],hA[0] };
 	uint32_t vb[2] = { hA[1],hA[1] };
 	uint32_t vc[2] = { hA[2],hA[2] };
@@ -781,25 +792,25 @@ static int mpc_verify(a as, int e, z z) {
                 //temp1 = h + s1 + CH(e,f,g) + k[i]+w[i];
 
                 //t0 = h + s1
-		if(mpc_ADD_verify(vh, s1, t0, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(vh, s1, t0, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
     			return 1;
 		}
-                if(mpc_CH_verify(ve, vf, vg, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+                if(mpc_CH_verify(ve, vf, vg, t1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
    			return 1;
 		}
 
 		//t1 = t0 + t1 (h+s1+ch)
-		if(mpc_ADD_verify(t0, t1, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(t0, t1, t1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
    			return 1;
 		}
 
 		t0[0] = k[i];
 		t0[1] = k[i];
-		if(mpc_ADD_verify(t1, t0, t1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(t1, t0, t1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
  			return 1;
 		}
 
-		if(mpc_ADD_verify(t1, w[i], temp1, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(t1, w[i], temp1, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
     			return 1;
 		}
 
@@ -813,12 +824,12 @@ static int mpc_verify(a as, int e, z z) {
                 //maj = (a & (b ^ c)) ^ (b & c);
                 //(a & b) ^ (a & c) ^ (b & c)
 
-		if(mpc_MAJ_verify(va, vb, vc, maj, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_MAJ_verify(va, vb, vc, maj, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
   			return 1;
 		}
 
                 //temp2 = s0+maj;
-		if(mpc_ADD_verify(s0, maj, temp2, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(s0, maj, temp2, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
      			return 1;
 		}
 
@@ -826,7 +837,7 @@ static int mpc_verify(a as, int e, z z) {
 		memcpy(vg, vf, sizeof(uint32_t) * 2);
  		memcpy(vf, ve, sizeof(uint32_t) * 2);
                 //e = d+temp1;
-		if(mpc_ADD_verify(vd, temp1, ve, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(vd, temp1, ve, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
       			return 1;
 		}
 
@@ -835,7 +846,7 @@ static int mpc_verify(a as, int e, z z) {
 		memcpy(vb, va, sizeof(uint32_t) * 2);
                 //a = temp1+temp2;
 
-		if(mpc_ADD_verify(temp1, temp2, va, z.ve, z.ve1, randomness, randCount, countY) == 1) {
+		if(mpc_ADD_verify(temp1, temp2, va, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
    			return 1;
  		}
 	}
@@ -843,28 +854,28 @@ static int mpc_verify(a as, int e, z z) {
 	uint32_t hHa[8][3] = { { hA[0],hA[0],hA[0]  }, { hA[1],hA[1],hA[1] }, { hA[2],hA[2],hA[2] }, { hA[3],hA[3],hA[3]
  },
 			{ hA[4],hA[4],hA[4] }, { hA[5],hA[5],hA[5] }, { hA[6],hA[6],hA[6] }, { hA[7],hA[7],hA[7] } };
-	if(mpc_ADD_verify(hHa[0], va, hHa[0], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[0], va, hHa[0], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[1], vb, hHa[1], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[1], vb, hHa[1], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[2], vc, hHa[2], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[2], vc, hHa[2], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[3], vd, hHa[3], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[3], vd, hHa[3], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[4], ve, hHa[4], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[4], ve, hHa[4], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[5], vf, hHa[5], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[5], vf, hHa[5], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[6], vg, hHa[6], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[6], vg, hHa[6], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
-	if(mpc_ADD_verify(hHa[7], vh, hHa[7], z.ve, z.ve1, randomness, randCount, countY) == 1) {
+	if(mpc_ADD_verify(hHa[7], vh, hHa[7], &zs.ve, &zs.ve1, randomness, randCount, countY) == 1) {
 		return 1;
 	}
 
@@ -922,372 +933,374 @@ static int mpc_verify(a as, int e, z z) {
 	uint32_t eee[2] = { hRIPE[4],hRIPE[4] };
 
 	// round 1 
-	if (mpc_FF2(aa, bb, cc, dd, ee, X[0], 11, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aa, bb, cc, dd, ee, X[0], 11, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ee, aa, bb, cc, dd, X[1], 14, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ee, aa, bb, cc, dd, X[1], 14, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(dd, ee, aa, bb, cc, X[2], 15, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(dd, ee, aa, bb, cc, X[2], 15, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(cc, dd, ee, aa, bb, X[3], 12, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(cc, dd, ee, aa, bb, X[3], 12, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bb, cc, dd, ee, aa, X[4], 5, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bb, cc, dd, ee, aa, X[4], 5, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aa, bb, cc, dd, ee, X[5], 8, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aa, bb, cc, dd, ee, X[5], 8, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ee, aa, bb, cc, dd, X[6], 7, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ee, aa, bb, cc, dd, X[6], 7, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(dd, ee, aa, bb, cc, X[7], 9, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(dd, ee, aa, bb, cc, X[7], 9, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(cc, dd, ee, aa, bb, X[8], 11, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(cc, dd, ee, aa, bb, X[8], 11, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bb, cc, dd, ee, aa, X[9], 13, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bb, cc, dd, ee, aa, X[9], 13, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aa, bb, cc, dd, ee, X[10], 14, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aa, bb, cc, dd, ee, X[10], 14, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ee, aa, bb, cc, dd, X[11], 15, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ee, aa, bb, cc, dd, X[11], 15, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(dd, ee, aa, bb, cc, X[12], 6, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(dd, ee, aa, bb, cc, X[12], 6, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(cc, dd, ee, aa, bb, X[13], 7, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(cc, dd, ee, aa, bb, X[13], 7, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bb, cc, dd, ee, aa, X[14], 9, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bb, cc, dd, ee, aa, X[14], 9, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aa, bb, cc, dd, ee, X[15], 8, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aa, bb, cc, dd, ee, X[15], 8, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// round 2
-	if (mpc_GG2(ee, aa, bb, cc, dd, X[7], 7, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ee, aa, bb, cc, dd, X[7], 7, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(dd, ee, aa, bb, cc, X[4], 6, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(dd, ee, aa, bb, cc, X[4], 6, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(cc, dd, ee, aa, bb, X[13], 8, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(cc, dd, ee, aa, bb, X[13], 8, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bb, cc, dd, ee, aa, X[1], 13, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bb, cc, dd, ee, aa, X[1], 13, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aa, bb, cc, dd, ee, X[10], 11, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aa, bb, cc, dd, ee, X[10], 11, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ee, aa, bb, cc, dd, X[6], 9, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ee, aa, bb, cc, dd, X[6], 9, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(dd, ee, aa, bb, cc, X[15], 7, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(dd, ee, aa, bb, cc, X[15], 7, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(cc, dd, ee, aa, bb, X[3], 15, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(cc, dd, ee, aa, bb, X[3], 15, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bb, cc, dd, ee, aa, X[12], 7, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bb, cc, dd, ee, aa, X[12], 7, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aa, bb, cc, dd, ee, X[0], 12, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aa, bb, cc, dd, ee, X[0], 12, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ee, aa, bb, cc, dd, X[9], 15, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ee, aa, bb, cc, dd, X[9], 15, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(dd, ee, aa, bb, cc, X[5], 9, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(dd, ee, aa, bb, cc, X[5], 9, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(cc, dd, ee, aa, bb, X[2], 11, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(cc, dd, ee, aa, bb, X[2], 11, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bb, cc, dd, ee, aa, X[14], 7, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bb, cc, dd, ee, aa, X[14], 7, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aa, bb, cc, dd, ee, X[11], 13, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aa, bb, cc, dd, ee, X[11], 13, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ee, aa, bb, cc, dd, X[8], 12, hG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ee, aa, bb, cc, dd, X[8], 12, hG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// round 3
 	
-	if (mpc_HH2(dd, ee, aa, bb, cc, X[3], 11, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(dd, ee, aa, bb, cc, X[3], 11, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(cc, dd, ee, aa, bb, X[10], 13, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(cc, dd, ee, aa, bb, X[10], 13, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bb, cc, dd, ee, aa, X[14], 6, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bb, cc, dd, ee, aa, X[14], 6, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aa, bb, cc, dd, ee, X[4], 7, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aa, bb, cc, dd, ee, X[4], 7, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ee, aa, bb, cc, dd, X[9], 14, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ee, aa, bb, cc, dd, X[9], 14, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(dd, ee, aa, bb, cc, X[15], 9, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(dd, ee, aa, bb, cc, X[15], 9, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(cc, dd, ee, aa, bb, X[8], 13, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(cc, dd, ee, aa, bb, X[8], 13, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bb, cc, dd, ee, aa, X[1], 15, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bb, cc, dd, ee, aa, X[1], 15, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aa, bb, cc, dd, ee, X[2], 14, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aa, bb, cc, dd, ee, X[2], 14, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ee, aa, bb, cc, dd, X[7], 8, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ee, aa, bb, cc, dd, X[7], 8, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(dd, ee, aa, bb, cc, X[0], 13, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(dd, ee, aa, bb, cc, X[0], 13, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(cc, dd, ee, aa, bb, X[6], 6, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(cc, dd, ee, aa, bb, X[6], 6, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bb, cc, dd, ee, aa, X[13], 5, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bb, cc, dd, ee, aa, X[13], 5, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aa, bb, cc, dd, ee, X[11], 12, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aa, bb, cc, dd, ee, X[11], 12, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ee, aa, bb, cc, dd, X[5], 7, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ee, aa, bb, cc, dd, X[5], 7, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(dd, ee, aa, bb, cc, X[12], 5, hH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(dd, ee, aa, bb, cc, X[12], 5, hH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// round 4
 	
-	if (mpc_II2(cc, dd, ee, aa, bb, X[1], 11, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(cc, dd, ee, aa, bb, X[1], 11, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bb, cc, dd, ee, aa, X[9], 12, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bb, cc, dd, ee, aa, X[9], 12, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aa, bb, cc, dd, ee, X[11], 14, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aa, bb, cc, dd, ee, X[11], 14, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ee, aa, bb, cc, dd, X[10], 15, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ee, aa, bb, cc, dd, X[10], 15, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(dd, ee, aa, bb, cc, X[0], 14, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(dd, ee, aa, bb, cc, X[0], 14, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(cc, dd, ee, aa, bb, X[8], 15, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(cc, dd, ee, aa, bb, X[8], 15, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bb, cc, dd, ee, aa, X[12], 9, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bb, cc, dd, ee, aa, X[12], 9, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aa, bb, cc, dd, ee, X[4], 8, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aa, bb, cc, dd, ee, X[4], 8, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ee, aa, bb, cc, dd, X[13], 9, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ee, aa, bb, cc, dd, X[13], 9, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(dd, ee, aa, bb, cc, X[3], 14, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(dd, ee, aa, bb, cc, X[3], 14, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(cc, dd, ee, aa, bb, X[7], 5, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(cc, dd, ee, aa, bb, X[7], 5, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bb, cc, dd, ee, aa, X[15], 6, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bb, cc, dd, ee, aa, X[15], 6, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aa, bb, cc, dd, ee, X[14], 8, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aa, bb, cc, dd, ee, X[14], 8, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ee, aa, bb, cc, dd, X[5], 6, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ee, aa, bb, cc, dd, X[5], 6, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(dd, ee, aa, bb, cc, X[6], 5, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(dd, ee, aa, bb, cc, X[6], 5, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(cc, dd, ee, aa, bb, X[2], 12, hI, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(cc, dd, ee, aa, bb, X[2], 12, hI, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// round 5
 
-	if (mpc_JJ2(bb, cc, dd, ee, aa, X[4], 9, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bb, cc, dd, ee, aa, X[4], 9, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aa, bb, cc, dd, ee, X[0], 15, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aa, bb, cc, dd, ee, X[0], 15, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ee, aa, bb, cc, dd, X[5], 5, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ee, aa, bb, cc, dd, X[5], 5, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(dd, ee, aa, bb, cc, X[9], 11, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(dd, ee, aa, bb, cc, X[9], 11, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(cc, dd, ee, aa, bb, X[7], 6, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(cc, dd, ee, aa, bb, X[7], 6, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bb, cc, dd, ee, aa, X[12], 8, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bb, cc, dd, ee, aa, X[12], 8, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aa, bb, cc, dd, ee, X[2], 13, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aa, bb, cc, dd, ee, X[2], 13, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ee, aa, bb, cc, dd, X[10], 12, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ee, aa, bb, cc, dd, X[10], 12, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(dd, ee, aa, bb, cc, X[14], 5, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(dd, ee, aa, bb, cc, X[14], 5, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(cc, dd, ee, aa, bb, X[1], 12, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(cc, dd, ee, aa, bb, X[1], 12, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bb, cc, dd, ee, aa, X[3], 13, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bb, cc, dd, ee, aa, X[3], 13, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aa, bb, cc, dd, ee, X[8], 14, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aa, bb, cc, dd, ee, X[8], 14, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ee, aa, bb, cc, dd, X[11], 11, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ee, aa, bb, cc, dd, X[11], 11, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(dd, ee, aa, bb, cc, X[6], 8, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(dd, ee, aa, bb, cc, X[6], 8, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(cc, dd, ee, aa, bb, X[15], 5, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(cc, dd, ee, aa, bb, X[15], 5, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bb, cc, dd, ee, aa, X[13], 6, hJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bb, cc, dd, ee, aa, X[13], 6, hJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// alt round 1
-	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[5], 8, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[5], 8, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[14], 9, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[14], 9, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[7], 9, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[7], 9, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[0], 11, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[0], 11, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[9], 13, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[9], 13, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[2], 15, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[2], 15, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[11], 15, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[11], 15, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[4], 5, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[4], 5, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[13], 7, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[13], 7, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[6], 7, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[6], 7, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[15], 8, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[15], 8, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[8], 11, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(eee, aaa, bbb, ccc, ddd, X[8], 11, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[1], 14, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ddd, eee, aaa, bbb, ccc, X[1], 14, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[10], 14, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(ccc, ddd, eee, aaa, bbb, X[10], 14, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[3], 12, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(bbb, ccc, ddd, eee, aaa, X[3], 12, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[12], 6, hJJ, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_JJ2(aaa, bbb, ccc, ddd, eee, X[12], 6, hJJ, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// alt round 2
 
-	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[6], 9, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[6], 9, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[11], 13, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[11], 13, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[3], 15, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[3], 15, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[7], 7, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[7], 7, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[0], 12, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[0], 12, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[13], 8, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[13], 8, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[5], 9, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[5], 9, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[10], 11, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[10], 11, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[14], 7, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[14], 7, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[15], 7, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[15], 7, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[8], 12, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[8], 12, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[12], 7, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ddd, eee, aaa, bbb, ccc, X[12], 7, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[4], 6, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(ccc, ddd, eee, aaa, bbb, X[4], 6, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[9], 15, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(bbb, ccc, ddd, eee, aaa, X[9], 15, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[1], 13, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(aaa, bbb, ccc, ddd, eee, X[1], 13, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[2], 11, hII, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_II2(eee, aaa, bbb, ccc, ddd, X[2], 11, hII, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// alt round 3
-	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[15], 9, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[15], 9, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[5], 7, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[5], 7, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[1], 15, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[1], 15, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[3], 11, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[3], 11, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[7], 8, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[7], 8, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[14], 6, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[14], 6, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[6], 6, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[6], 6, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[9], 14, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[9], 14, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[11], 12, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[11], 12, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[8], 13, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[8], 13, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[12], 5, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[12], 5, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[2], 14, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ccc, ddd, eee, aaa, bbb, X[2], 14, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[10], 13, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(bbb, ccc, ddd, eee, aaa, X[10], 13, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[0], 13, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(aaa, bbb, ccc, ddd, eee, X[0], 13, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[4], 7, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(eee, aaa, bbb, ccc, ddd, X[4], 7, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[13], 5, hHH, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_HH2(ddd, eee, aaa, bbb, ccc, X[13], 5, hHH, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// alt round 4
-	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[8], 15, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[8], 15, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[6], 5, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[6], 5, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[4], 8, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[4], 8, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[1], 11, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[1], 11, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[3], 14, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[3], 14, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[11], 14, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[11], 14, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[15], 6, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[15], 6, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[0], 14, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[0], 14, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[5], 6, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[5], 6, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[12], 9, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[12], 9, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[2], 12, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[2], 12, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[13], 9, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(bbb, ccc, ddd, eee, aaa, X[13], 9, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[9], 12, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(aaa, bbb, ccc, ddd, eee, X[9], 12, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[7], 5, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(eee, aaa, bbb, ccc, ddd, X[7], 5, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[10], 15, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ddd, eee, aaa, bbb, ccc, X[10], 15, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[14], 8, hGG, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_GG2(ccc, ddd, eee, aaa, bbb, X[14], 8, hGG, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
 	// alt round 5
-	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[12], 8, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[12], 8, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[15], 5, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[15], 5, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[10], 12, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[10], 12, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[4], 9, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[4], 9, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[1], 12, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[1], 12, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[5], 5, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[5], 5, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[8], 14, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[8], 14, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[7], 6, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[7], 6, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[6], 8, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[6], 8, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[2], 13, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[2], 13, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[13], 6, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[13], 6, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[14], 5, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(aaa, bbb, ccc, ddd, eee, X[14], 5, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[0], 15, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(eee, aaa, bbb, ccc, ddd, X[0], 15, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[3], 13, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ddd, eee, aaa, bbb, ccc, X[3], 13, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[9], 11, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(ccc, ddd, eee, aaa, bbb, X[9], 11, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
-	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[11], 11, z.ve, z.ve1, randomness, randCount, countY) == 1)
+	if (mpc_FF2(bbb, ccc, ddd, eee, aaa, X[11], 11, &zs.ve, &zs.ve1, randomness, randCount, countY) == 1)
 		return 1;
 
-	 if (mpc_ADD_verify(cc,buf[1],t0,z.ve,z.ve1,randomness,randCount,countY)==1)
+	 if (mpc_ADD_verify(cc,buf[1],t0,&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		 return 1;
-	if (mpc_ADD_verify(t0,ddd,t1,z.ve,z.ve1,randomness,randCount,countY) == 1)
+	if (mpc_ADD_verify(t0,ddd,t1,&zs.ve,&zs.ve1,randomness,randCount,countY) == 1)
 		return 1;
-	if (mpc_ADD_verify(dd,buf[2],t0,z.ve,z.ve1,randomness,randCount,countY) ==1)
+	if (mpc_ADD_verify(dd,buf[2],t0,&zs.ve,&zs.ve1,randomness,randCount,countY) ==1)
 		return 1;
-	if (mpc_ADD_verify(t0,eee,buf[1],z.ve,z.ve1,randomness,randCount,countY) ==1)
+	if (mpc_ADD_verify(t0,eee,buf[1],&zs.ve,&zs.ve1,randomness,randCount,countY) ==1)
 		return 1;
-	if (mpc_ADD_verify(ee,buf[3],t0,z.ve,z.ve1,randomness,randCount,countY)==1)
+	if (mpc_ADD_verify(ee,buf[3],t0,&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		return 1;
-	if (mpc_ADD_verify(t0,aaa,buf[2],z.ve,z.ve1,randomness,randCount,countY)==1)
+	if (mpc_ADD_verify(t0,aaa,buf[2],&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		return 1;
-	if (mpc_ADD_verify(aa,buf[4],t0,z.ve,z.ve1,randomness,randCount,countY)==1)
+	if (mpc_ADD_verify(aa,buf[4],t0,&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		return 1;
-	if (mpc_ADD_verify(t0,bbb,buf[3],z.ve,z.ve1,randomness,randCount,countY)==1)
+	if (mpc_ADD_verify(t0,bbb,buf[3],&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		return 1;
-	if (mpc_ADD_verify(bb,buf[0],t0,z.ve,z.ve1,randomness,randCount,countY)== 1)
+	if (mpc_ADD_verify(bb,buf[0],t0,&zs.ve,&zs.ve1,randomness,randCount,countY)== 1)
 		return 1;
-	if (mpc_ADD_verify(t0,ccc,buf[4],z.ve,z.ve1,randomness,randCount,countY)==1)
+	if (mpc_ADD_verify(t0,ccc,buf[4],&zs.ve,&zs.ve1,randomness,randCount,countY)==1)
 		return 1;
 
-	free(randCount);
 	free(countY);
+	free(randCount);
+	free(randomness[0]);
+	free(randomness[1]);
 
 	return 0;
 }
@@ -2751,6 +2764,10 @@ char * generate_poc(char * message, char * secret, char * params)
 	}
 	H3(message, finalHash, as, NUM_ROUNDS, es);
 
+	if (debug)
+	{
+		printf("message is [%s], length %ld e0 is %d\n",message,strlen(message),es[0]);
+	}
 
 	//Packing Z
 	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
@@ -2828,7 +2845,11 @@ char * verify_poc(char * message, char * proof, char * params)
 	SHA256_CTX shactx;
 	unsigned char shahash[SHA256_DIGEST_LENGTH];
 	int passed = 1;
+	FILE * f;
+	char * fileproof = NULL;
 
+	memset(as,0,sizeof(a)*NUM_ROUNDS);
+	memset(zs,0,sizeof(z)*NUM_ROUNDS);
 	if (debug)
 	{
 		printf("proof received [%s]\n",proof);
@@ -2836,12 +2857,29 @@ char * verify_poc(char * message, char * proof, char * params)
 	}
 	if (strlen(proof)<((sizeof(a)+sizeof(z))*NUM_ROUNDS*2))
 	{
-		printf("Incorrect proof length\n");
-		return NULL;
+		f = fopen(proof,"r");
+		if (!f)
+		{
+			printf("unable to open proof file %s\n",proof);
+			sprintf(ret,"unable to open proof file %s\n",proof);
+			return ret;
+		}
+		fileproof = malloc((sizeof(a)+sizeof(z))*NUM_ROUNDS*2+1);
+		memset(fileproof,0,((sizeof(a)+sizeof(z))*NUM_ROUNDS*2)+1);
+		fread(fileproof,1,((sizeof(a)+sizeof(z))*NUM_ROUNDS*2),f);
+		proof = fileproof;
+		fclose(f);
+	}
+	if (debug)
+	{
+		printf("length of proof read [%ld]\n",strlen(proof));
+//		printf("proof [%s]\n",proof);
 	}
 	hex2bin(proof,sizeof(a)*NUM_ROUNDS*2,(unsigned char *)as);
 	hex2bin(&(proof[sizeof(a)*NUM_ROUNDS*2]),sizeof(z)*NUM_ROUNDS*2,(unsigned char *)zs);
 	reconstruct(as[0].yp[0],as[0].yp[1],as[0].yp[2],y);
+	if (fileproof)
+		free(fileproof);
 	if (debug)
 	{
 		printf("Proof for hash: ");
@@ -2851,11 +2889,17 @@ char * verify_poc(char * message, char * proof, char * params)
 		printf("\n");
 	}
 	H3(message,y, as, NUM_ROUNDS, es);
+	if (debug)
+	{
+		printf("message is [%s], length %ld e0 is %d\n",message,strlen(message),es[0]);
+	}
+	
+	int verifyResult = 0;
         for(int i = 0; i<NUM_ROUNDS; i++) {
-		int verifyResult = mpc_verify(as[i], es[i], zs[i]);
+		verifyResult = mpc_verify(&(as[i]), es[i], &(zs[i]));
 		if (verifyResult != 0) 
 		{
-			printf("Not Verified %d\n", i);
+			printf("Not Verified [%d] %d\n", verifyResult, i);
 			passed = 0;
 		}	
 	}
@@ -2863,8 +2907,8 @@ char * verify_poc(char * message, char * proof, char * params)
 	if (!passed)
 	{
 		printf("verification failed\n");
-		free(ret);
-		return NULL;
+		sprintf(ret,"verification failed!!!!!!!!!!!");
+		return ret;
 	}
 	else
 	{

@@ -1,10 +1,10 @@
 TARGETS: PoAO.exe  PoAO.js
 
 PoAO.exe: PoAO.c PoAO.h sha256.c sha256.h ripemd160.c
-	gcc -g sha256.c ripemd160.c PoAO.c -o PoAO.exe 
+	gcc -g -Warray-bounds sha256.c ripemd160.c PoAO.c -o PoAO.exe 
 
 PoAO.js: PoAO.c PoAO.h sha256.c sha256.h ripemd160.c
-	emcc -DWASM sha256.c ripemd160.c PoAO.c -o PoAO.js -sEXPORTED_RUNTIME_METHODS=ccall
+	emcc -DWASM sha256.c ripemd160.c PoAO.c -o PoAO.js -sEXPORTED_RUNTIME_METHODS=ccall -s FORCE_FILESYSTEM=1 
 
 MPC_ADDRESS.exe: MPC_ADDRESS.c shared_address.h
 	gcc -g -fopenmp MPC_ADDRESS.c -o MPC_ADDRESS.exe -lssl -lcrypto -lgmp
