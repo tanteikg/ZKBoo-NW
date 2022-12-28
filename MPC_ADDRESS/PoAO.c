@@ -388,8 +388,8 @@ static void H3(char * msg, uint32_t y[5], a* as, int s, int* es) {
 
 }
 
-static void output(View v, uint32_t* result) {
-	memcpy(result, &v.y[ySize - 5], 20);
+static void output(View *v, uint32_t* result) {
+	memcpy(result, &v->y[ySize - 5], 20);
 }
 
 static void reconstruct(uint32_t* y0, uint32_t* y1, uint32_t* y2, uint32_t* result) {
@@ -713,12 +713,12 @@ static int mpc_verify(a* as, int e, z * zp) {
 	}
 
 	uint32_t result[5];
-	output(zs.ve, result);
+	output(&zs.ve, result);
 	if (memcmp(as->yp[e], result, 20) != 0) {
 		return 1;
 	}
 
-	output(zs.ve1, result);
+	output(&zs.ve1, result);
 	if (memcmp(as->yp[(e + 1) % 3], result, 20) != 0) {
 		return 1;
 	}
@@ -2317,7 +2317,7 @@ static int secretShare(unsigned char* input, int numBytes, unsigned char output[
 	return 0;
 }
 
-static a commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomness[3], unsigned char rs[3][4], View views[3], unsigned char hashresult[RIPEMD160_DIGEST_LENGTH]) {
+static void commit(int numBytes,unsigned char shares[3][numBytes], unsigned char *randomness[3], unsigned char rs[3][4], View views[3], unsigned char hashresult[RIPEMD160_DIGEST_LENGTH],a * as) {
 static int printonce=0;
 
 	unsigned char* inputs[3];
@@ -2452,22 +2452,21 @@ static int printonce=0;
 	free(puby[2]);
 */
 	uint32_t* result1 = malloc(20);
-	output(views[0], result1);
+	output(&views[0], result1);
 	uint32_t* result2 = malloc(20);
-	output(views[1], result2);
+	output(&views[1], result2);
 	uint32_t* result3 = malloc(20);
-	output(views[2], result3);
+	output(&views[2], result3);
 
-	a a;
-	memcpy(a.yp[0], result1, 20);
-	memcpy(a.yp[1], result2, 20);
-	memcpy(a.yp[2], result3, 20);
+	memcpy(as->yp[0], result1, 20);
+	memcpy(as->yp[1], result2, 20);
+	memcpy(as->yp[2], result3, 20);
 
 	free(result1);
 	free(result2);
 	free(result3);
 
-	return a;
+	return;
 }
 
 static void prove(z *zs, int e, unsigned char keys[3][16], unsigned char rs[3][4], View views[3]) {
@@ -2660,6 +2659,75 @@ static void hex2bin(char * hex , int hexsize, unsigned char * bin)
 		bin[(i)/2] = tempc; 
 	}
 }
+static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
+				'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
+				'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
+				'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
+				'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
+				'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+				'w', 'x', 'y', 'z', '0', '1', '2', '3',
+				'4', '5', '6', '7', '8', '9', '+', '/'};
+static char decoding_table[256];
+static int mod_table[] = {0, 2, 1};
+static int decoding_table_init =0;
+
+char *base64_encode(const unsigned char *data, size_t input_length, char * encoded_data, size_t *output_length) 
+{
+	*output_length = 4 * ((input_length + 2) / 3);
+//	char *encoded_data = malloc(*output_length);
+	if (encoded_data == NULL) return NULL;
+	for (int i = 0, j = 0; i < input_length;) 
+	{
+		uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+		uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+		uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+		uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+		encoded_data[j++] = encoding_table[(triple >> 3 * 6) & 0x3F];
+		encoded_data[j++] = encoding_table[(triple >> 2 * 6) & 0x3F];
+		encoded_data[j++] = encoding_table[(triple >> 1 * 6) & 0x3F];
+		encoded_data[j++] = encoding_table[(triple >> 0 * 6) & 0x3F];
+	}
+	for (int i = 0; i < mod_table[input_length % 3]; i++)
+		encoded_data[*output_length - 1 - i] = '=';
+
+	return encoded_data;
+}
+
+unsigned char *base64_decode(const char *data, size_t input_length, unsigned char * decoded_data, size_t *output_length) 
+{
+	if (!decoding_table_init)
+	{
+		memset(decoding_table,0,256);
+	        for (int i = 0; i < 64; i++)
+			decoding_table[(unsigned char) encoding_table[i]] = i;
+		decoding_table_init = 1;
+	}
+
+	if (input_length % 4 != 0) return NULL;
+
+	*output_length = input_length / 4 * 3;
+	if (data[input_length - 1] == '=') (*output_length)--;
+	if (data[input_length - 2] == '=') (*output_length)--;
+
+//	unsigned char *decoded_data = malloc(*output_length);
+	if (decoded_data == NULL) return NULL;
+
+	for (int i = 0, j = 0; i < input_length;) 
+	{
+		uint32_t sextet_a = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+		uint32_t sextet_b = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+		uint32_t sextet_c = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+		uint32_t sextet_d = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+		uint32_t triple = (sextet_a << 3 * 6) + (sextet_b << 2 * 6) + (sextet_c << 1 * 6) + (sextet_d << 0 * 6);
+
+		if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
+		if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
+		if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
+	}
+
+	return decoded_data;
+}
+
 static void bin2hex(unsigned char * bin, int binsize, char * hex)
 {
 	char * hexptr;
@@ -2689,8 +2757,9 @@ char * generate_poc(char * message, char * secret, char * params)
 	int i;
 	unsigned char rs[NUM_ROUNDS][3][4];
 	unsigned char keys[NUM_ROUNDS][3][16];
-	a as[NUM_ROUNDS];
-	View localViews[NUM_ROUNDS][3];
+	unsigned char * a_z;
+	a *as;
+	View *localViews[NUM_ROUNDS];
 	unsigned char shares[NUM_ROUNDS][3][KEY_LEN];
 	unsigned char *randomness[NUM_ROUNDS][3];
 	char * proof;
@@ -2738,9 +2807,13 @@ char * generate_poc(char * message, char * secret, char * params)
 		}
 	}
 
+	a_z = malloc((sizeof(a)+sizeof(z))*NUM_ROUNDS);
+	as = (a *) a_z;
+	z* zs = (z *) (a_z+(sizeof(a)*NUM_ROUNDS));
 	uint8_t ripehash[20];
 	for(int k=0; k<NUM_ROUNDS; k++) {
-		as[k] = commit(KEY_LEN, shares[k], randomness[k], rs[k], localViews[k],ripehash);
+		localViews[k] = malloc(sizeof(View)*3);
+		commit(KEY_LEN, shares[k], randomness[k], rs[k], localViews[k],ripehash,&as[k]);
 		for(int j=0; j<3; j++) {
 			free(randomness[k][j]);
 		}
@@ -2770,39 +2843,18 @@ char * generate_poc(char * message, char * secret, char * params)
 	}
 
 	//Packing Z
-	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
+//	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
 
 	for(int i = 0; i<NUM_ROUNDS; i++) {
 		prove(&zs[i],es[i],keys[i],rs[i], localViews[i]);
+		free(localViews[i]);
 	}
 
 	uint32_t combined[5];
 	unsigned char shahash[32];
-	/*
-	output(localViews[0][0],(uint32_t*)ripehash[0]);	
-	output(localViews[0][1],(uint32_t*)ripehash[1]);	
-	output(localViews[0][2],(uint32_t*)ripehash[2]);	
-	reconstruct(ripehash[0],ripehash[1],ripehash[2],combined);
-	*/
-
-	proof = malloc(P_SIZE);
-	memset(proof,0,P_SIZE);
-	bin2hex((unsigned char *)as,sizeof(a)*NUM_ROUNDS,proof);
-	bin2hex((unsigned char *)zs,sizeof(z)*NUM_ROUNDS,proof+(sizeof(a)*NUM_ROUNDS*2));
-	free(zs);
-
 	addrbuf[0] = 0;
 	hex2bin(params,2,&(addrbuf[0]));
 	memcpy(&addrbuf[1],ripehash,20);
-	/*
-	for (int i=0;i<5;i++)
-	{
-		addrbuf[1+i*4] = combined[i]>>24;
-		addrbuf[1+i*4+1] = combined[i]>>16;
-		addrbuf[1+i*4+2] = combined[i]>>8;
-		addrbuf[1+i*4+3] = combined[i]>>0;
-	}
-	*/
 	sha256_init(&shactx);
 	sha256_update(&shactx,addrbuf,21);
 	sha256_final(&shactx,shahash);
@@ -2820,22 +2872,54 @@ char * generate_poc(char * message, char * secret, char * params)
 		return NULL;
 	}
 
+	proof = malloc(P_SIZE);
+	memset(proof,0,P_SIZE);
+	sprintf(proof,"{\"ver\":\"poc%03d\",\"params\":\"%s\",\"wallet\":\"%s\",\"msg\":\"%s\",\"proof\":\"",NUM_ROUNDS,params,addrstr,message);
+	size_t zsize = P_SIZE - strlen(proof);
+	base64_encode(a_z, (sizeof(z)+sizeof(a))*NUM_ROUNDS,proof+strlen(proof),&zsize); 
+//	bin2hex((unsigned char *)as,sizeof(a)*NUM_ROUNDS,proof);
+//	bin2hex((unsigned char *)zs,sizeof(z)*NUM_ROUNDS,proof+(sizeof(a)*NUM_ROUNDS*2));
+	free(a_z);
+	strcat(proof,"\"}");
+
 	if (debug)
 		printf("address: %s\n",addrstr);
 	return proof;
 
 }
 
+static char * getvalue(char * sourcestr)
+{
+	char * tempc, *tempstart;
+	tempc  = sourcestr;
+	while ((*tempc != '"') && (*tempc != 0))
+	{
+		tempc++;
+	}
+	if (tempc++)
+	{
+		tempstart = tempc;
+		while ((*tempc != '"') && (*tempc != 0))
+		{
+			tempc++;
+		}
+		*tempc = 0;
+		return tempstart;
+	}
+	return NULL;
+}
+		
 
 // verify - verify proof from public key
 #ifdef WASM
 EMSCRIPTEN_KEEPALIVE
 #endif
-char * verify_poc(char * message, char * proof, char * params)
+char * verify_poc(char * prooffile)
 {
 	char * ret = malloc(1000);
-	a as[NUM_ROUNDS];
-	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
+	unsigned char * a_z;
+	a * as;
+	z* zs;
 	int es[NUM_ROUNDS];
 	uint32_t y[5];
 	int i;
@@ -2846,40 +2930,70 @@ char * verify_poc(char * message, char * proof, char * params)
 	unsigned char shahash[SHA256_DIGEST_LENGTH];
 	int passed = 1;
 	FILE * f;
-	char * fileproof = NULL;
-
-	memset(as,0,sizeof(a)*NUM_ROUNDS);
-	memset(zs,0,sizeof(z)*NUM_ROUNDS);
+	char * jsonproof = NULL;
+	char * proof = NULL;
+	char * message = NULL;
+	char * wallet = NULL;
+	char * params = NULL;
+	char * tempc;
+	
+	a_z = malloc((sizeof(a)+sizeof(z))*NUM_ROUNDS);
+	memset(a_z,0,(sizeof(z)+sizeof(a))*NUM_ROUNDS);
+	as = (a *) a_z;
+	size_t asize = (sizeof(a)+sizeof(z))*NUM_ROUNDS;
+	zs = (z *) (a_z+(sizeof(a)*NUM_ROUNDS));
 	if (debug)
 	{
-		printf("proof received [%s]\n",proof);
-		printf("Length of proof received = %ld, expected %ld\n",strlen(proof),(sizeof(a)+sizeof(z))*NUM_ROUNDS*2);
+		printf("proof received [%s]\n",prooffile);
 	}
-	if (strlen(proof)<((sizeof(a)+sizeof(z))*NUM_ROUNDS*2))
 	{
-		f = fopen(proof,"r");
+		f = fopen(prooffile,"r");
 		if (!f)
 		{
-			printf("unable to open proof file %s\n",proof);
-			sprintf(ret,"unable to open proof file %s\n",proof);
+			printf("unable to open proof file %s\n",prooffile);
+			sprintf(ret,"unable to open proof file %s\n",prooffile);
 			return ret;
 		}
-		fileproof = malloc((sizeof(a)+sizeof(z))*NUM_ROUNDS*2+1);
-		memset(fileproof,0,((sizeof(a)+sizeof(z))*NUM_ROUNDS*2)+1);
-		fread(fileproof,1,((sizeof(a)+sizeof(z))*NUM_ROUNDS*2),f);
-		proof = fileproof;
+		jsonproof = malloc(P_SIZE+1);
+		memset(jsonproof,0,P_SIZE+1);
+		fread(jsonproof,1,P_SIZE,f);
 		fclose(f);
 	}
 	if (debug)
 	{
-		printf("length of proof read [%ld]\n",strlen(proof));
-//		printf("proof [%s]\n",proof);
+		printf("length of proof read [%ld]\n",strlen(jsonproof));
+//		printf("proof [%s]\n",jsonproof);
 	}
-	hex2bin(proof,sizeof(a)*NUM_ROUNDS*2,(unsigned char *)as);
-	hex2bin(&(proof[sizeof(a)*NUM_ROUNDS*2]),sizeof(z)*NUM_ROUNDS*2,(unsigned char *)zs);
+	params = strstr(jsonproof,"\"params");
+	wallet = strstr(jsonproof,"\"wallet");
+	message = strstr(jsonproof,"\"msg");
+	proof = strstr(jsonproof,"\"proof");
+	if ((!params) || (!wallet) || (!message) || (!proof))
+	{
+		sprintf(ret,"unable to find required values in proof");
+		free(jsonproof);
+		return ret;
+	}
+	// cheating
+	params += strlen("params':");
+	params = getvalue(params);
+	wallet += strlen("wallet':");
+	wallet = getvalue(wallet);
+	message += strlen("msg':");
+	message = getvalue(message);
+	proof += strlen("proof':");
+	proof = getvalue(proof);
+	if (debug)
+	{
+		printf("params [%s], wallet [%s], message [%s]\n",params,wallet,message);
+		printf("proof [%s]\n",proof);
+	}
+
+		
+	base64_decode(proof, strlen(proof), a_z , &asize);
+//	hex2bin(proof,sizeof(a)*NUM_ROUNDS*2,(unsigned char *)as);
+//	hex2bin(&(proof[sizeof(a)*NUM_ROUNDS*2]),sizeof(z)*NUM_ROUNDS*2,(unsigned char *)zs);
 	reconstruct(as[0].yp[0],as[0].yp[1],as[0].yp[2],y);
-	if (fileproof)
-		free(fileproof);
 	if (debug)
 	{
 		printf("Proof for hash: ");
@@ -2903,11 +3017,12 @@ char * verify_poc(char * message, char * proof, char * params)
 			passed = 0;
 		}	
 	}
-	free(zs);
+	free(a_z);
 	if (!passed)
 	{
 		printf("verification failed\n");
 		sprintf(ret,"verification failed!!!!!!!!!!!");
+		free(jsonproof);
 		return ret;
 	}
 	else
@@ -2938,11 +3053,20 @@ char * verify_poc(char * message, char * proof, char * params)
 		{
 			printf("b58enc error\n");
 			free(ret);
+			free(jsonproof);
 			return NULL;
+		}
+		else if (strcmp(addrstr,wallet))
+		{
+			sprintf(ret,"wallet address error");
+			free(jsonproof);
+			return ret;
 		}
 		else
 		{
+
 			sprintf(ret,"message [%s] for address [%s] verified ok",message,addrstr);
+			free(jsonproof);
 			return ret;
 		}
 	}
@@ -2962,24 +3086,26 @@ int main(int argc, char * argv[])
 {
 	char * rc;
 
-	if (argc != 5)
+	if ((argc != 5) && (argc != 3))
 	{
-		printf("Usage: %s <func: 1=generate,2=verify> <message> <key/proof> <params>\n",argv[0]);
+		printf("Usage: %s <func: 1=generate> <message> <key/proof> <params>\n",argv[0]);
+		printf("Usage: %s <func: 2=verify> <proof file>\n",argv[0]);
 		return -1;
 	}	       
-	if (argv[1][0] == '1')
+	if ((argv[1][0] == '1') && (argc == 5))
 	{
 		rc = generate_poc(argv[2],argv[3],argv[4]);
 		printf("%s",rc);
 	}
-	else if (argv[1][0] == '2')
+	else if ((argv[1][0] == '2') && (argc == 3))
 	{
-		rc = verify_poc(argv[2],argv[3],argv[4]);
+		rc = verify_poc(argv[2]);
 		printf("%s",rc);
 	}
 	else
 	{
-		printf("Usage: %s <func: 1=generate,2=verify> <message> <key/proof> <params>\n",argv[0]);
+		printf("Usage: %s <func: 1=generate> <message> <key/proof> <params>\n",argv[0]);
+		printf("Usage: %s <func: 2=verify> <proof file>\n",argv[0]);
 		return -1;
 	}	       
 	if (rc)
