@@ -118,7 +118,8 @@ typedef struct {
 #define SHA256_DIGEST_LENGTH 32
 
 extern void ripemd160(const uint8_t* msg, uint32_t msg_len, uint8_t* hash);
-#define NUM_ROUNDS 10 
+#define NUM_ROUNDS 32 
+#define USER_LEN 20
 
 //#define P_SIZE (((sizeof(z)+sizeof(a))*2*NUM_ROUNDS)+1)
 #define P_SIZE ((((((sizeof(z)+sizeof(a))*NUM_ROUNDS)/3)+1)*4) + 200) // b64 + JSON

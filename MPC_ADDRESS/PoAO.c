@@ -2748,13 +2748,14 @@ static void bin2hex(unsigned char * bin, int binsize, char * hex)
 #ifdef WASM
 EMSCRIPTEN_KEEPALIVE
 #endif
-char * generate_poc(char * message, char * secret, char * params)
+char * generate_poc(char * username, char * secret, char * params)
 {
 	int KEY_LEN = strlen(secret)/2;
 	unsigned char garbage[4];
 	unsigned char pubkey[KEY_LEN];
 	unsigned char addrbuf[100];
 	int i;
+	char message[200];
 	unsigned char rs[NUM_ROUNDS][3][4];
 	unsigned char keys[NUM_ROUNDS][3][16];
 	unsigned char * a_z;
@@ -2767,6 +2768,9 @@ char * generate_poc(char * message, char * secret, char * params)
 	char  addrstr[200];
 	unsigned long int addrstrlen;
 
+	memset(message,0,sizeof(message));
+	strncpy(message,username,USER_LEN);
+	strcat(message," knows the public key to this address");
 	srand((unsigned) time(NULL));
 	if(RAND_bytes(garbage, 4) != 1) {
 		printf("RAND_bytes failed crypto, aborting");
