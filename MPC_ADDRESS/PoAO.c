@@ -2955,7 +2955,7 @@ char * verify_poc(char * prooffile)
 		if (!f)
 		{
 			printf("unable to open proof file %s\n",prooffile);
-			sprintf(ret,"unable to open proof file %s\n",prooffile);
+			sprintf(ret,"{\"rc\":3,\"msg\":\"Unable to open proof file %s\"}\n",prooffile);
 			return ret;
 		}
 		jsonproof = malloc(P_SIZE+1);
@@ -3017,15 +3017,15 @@ char * verify_poc(char * prooffile)
 		verifyResult = mpc_verify(&(as[i]), es[i], &(zs[i]));
 		if (verifyResult != 0) 
 		{
-			printf("Not Verified [%d] %d\n", verifyResult, i);
+			if (debug)
+				printf("Not Verified [%d] %d\n", verifyResult, i);
 			passed = 0;
 		}	
 	}
 	free(a_z);
 	if (!passed)
 	{
-		printf("verification failed\n");
-		sprintf(ret,"verification failed!!!!!!!!!!!");
+		sprintf(ret,"{\"rc\":1,\"msg\":\"Verification Failed !\"}");
 		free(jsonproof);
 		return ret;
 	}
@@ -3062,14 +3062,14 @@ char * verify_poc(char * prooffile)
 		}
 		else if (strcmp(addrstr,wallet))
 		{
-			sprintf(ret,"wallet address error");
+			sprintf(ret,"{\"rc\":2,\"msg\":\"Wallet Address Error\"}\n");
 			free(jsonproof);
 			return ret;
 		}
 		else
 		{
 
-			sprintf(ret,"message [%s] for address [%s] verified ok",message,addrstr);
+			sprintf(ret,"{\"rc\":0,\"msg\":\"message [%s] for address [%s] verified ok\"}\n",message,addrstr);
 			free(jsonproof);
 			return ret;
 		}
