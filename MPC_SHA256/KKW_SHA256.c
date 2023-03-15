@@ -42,7 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "shared.h"
+#include "KKW_shared.h"
 #include "omp.h"
 
 
@@ -53,8 +53,35 @@ int totalRandom = 0;
 int totalSha = 0;
 int totalSS = 0;
 int totalHash = 0;
-int NUM_ROUNDS = 136;
 
+void Compute_RAND(unsigned char * output, int size, unsigned char * seed, int seedLen)
+{
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	char * tempptr = output;
+
+	SHA256_CTX ctx;
+	SHA256_Init(&ctx);
+	SHA256_Update(&ctx, &seedLen, sizeof(int));
+	SHA256_Update(&ctx, seed, seedLen);
+	SHA256_Update(&ctx, &size, sizeof(int));
+        SHA256_Final(hash, &ctx);
+	while (size > 0)
+	{
+		SHA256_Init(&ctx);
+		SHA256_Update(&ctx, &seedLen, sizeof(int));
+		SHA256_Update(&ctx, seed, seedLen);
+		SHA256_Update(&ctx, hash, sizeof(hash));
+        	SHA256_Final(hash, &ctx);
+		if (size >= SHA256_DIGEST_LENGTH)
+		{
+			memcpy(tempptr,hash,SHA256_DIGEST_LENGTH);
+			tempptr += SHA256_DIGEST_LENGTH;
+		}
+		else
+			memcpy(tempptr,hash,size);
+		size -= SHA256_DIGEST_LENGTH;
+	}
+}
 
 
 
@@ -76,7 +103,7 @@ void printbits(uint32_t n) {
 
 }
 
-
+/*
 
 void mpc_XOR(uint32_t x[3], uint32_t y[3], uint32_t z[3]) {
 	z[0] = x[0] ^ y[0];
@@ -84,7 +111,7 @@ void mpc_XOR(uint32_t x[3], uint32_t y[3], uint32_t z[3]) {
 	z[2] = x[2] ^ y[2];
 }
 
-
+*/
 
 void mpc_AND(uint32_t x[3], uint32_t y[3], uint32_t z[3], unsigned char *randomness[3], int* randCount, View views[3], int* countY) {
 	uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
@@ -103,7 +130,7 @@ void mpc_AND(uint32_t x[3], uint32_t y[3], uint32_t z[3], unsigned char *randomn
 	(*countY)++;
 }
 
-
+/*
 
 void mpc_NEGATE(uint32_t x[3], uint32_t z[3]) {
 	z[0] = ~x[0];
@@ -111,7 +138,7 @@ void mpc_NEGATE(uint32_t x[3], uint32_t z[3]) {
 	z[2] = ~x[2];
 }
 
-
+*/
 
 void mpc_ADD(uint32_t x[3], uint32_t y[3], uint32_t z[3], unsigned char *randomness[3], int* randCount, View views[3], int* countY) {
 	uint32_t c[3] = { 0 };
@@ -198,7 +225,7 @@ void mpc_ADDK(uint32_t x[3], uint32_t y, uint32_t z[3], unsigned char *randomnes
 	*countY += 1;
 
 }
-
+/*
 
 int sha256(unsigned char* result, unsigned char* input, int numBits) {
 	uint32_t hA[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -302,7 +329,7 @@ void mpc_RIGHTSHIFT(uint32_t x[3], int i, uint32_t z[3]) {
 	z[2] = x[2] >> i;
 }
 
-
+*/
 
 
 
@@ -582,25 +609,10 @@ z prove(int e, unsigned char keys[3][16], unsigned char rs[3][4], View views[3])
 	return z;
 }
 
-static void computeSaltAndRootSeed(uint8_t* saltAndRoot, size_t saltAndRootLength, uint32_t* privateKey, uint32_t* pubKey,
-                                   uint32_t* plaintext, const uint8_t* message, size_t messageByteLength, paramset_t* params)
-{
-    HashInstance ctx;
-
-    HashInit(&ctx, params, HASH_PREFIX_NONE);
-    HashUpdate(&ctx, (uint8_t*)privateKey, params->stateSizeBytes);
-    HashUpdate(&ctx, message, messageByteLength);
-    HashUpdate(&ctx, (uint8_t*)pubKey, params->stateSizeBytes);
-    HashUpdate(&ctx, (uint8_t*)plaintext, params->stateSizeBytes);
-    HashUpdateIntLE(&ctx, params->stateSizeBits);
-    HashFinal(&ctx);
-    HashSqueeze(&ctx, saltAndRoot, saltAndRootLength);
-}
-
-
 int main(void) {
 	setbuf(stdout, NULL);
 	srand((unsigned) time(NULL));
+
 	init_EVP();
 	openmp_thread_setup();
 
@@ -612,135 +624,66 @@ int main(void) {
 	}
 	
 	printf("Enter the string to be hashed (Max 55 characters): ");
-	char userInput[55]; //55 is max length as we only support 447 bits = 55.875 bytes
-	fgets(userInput, sizeof(userInput), stdin);
+	char userInput[56]; //55 is max length as we only support 447 bits = 55.875 bytes
+	memset(userInput,0,sizeof(userInput));
+	fgets(userInput, sizeof(userInput)-1, stdin);
 	
-	int i = strlen(userInput)-1; 
+	int i = strlen(userInput); 
 	printf("String length: %d\n", i);
 	
 	//printf("Iterations of SHA: %d\n", NUM_ROUNDS);
 
-	unsigned char input[i];
+	unsigned char input[SHA256_INPUTS]; // 512 bits
+	memset(input,0,sizeof(input));
 	for(int j = 0; j<i; j++) {
 		input[j] = userInput[j];
 	}
 
-	// following Picnic3_L1
-	int pqSecurityLevel = 64;
-	paramset_t params = (paramset_t *) malloc(sizeof(paramset_t));
-        paramset->stateSizeBits = 129;
-        paramset->numMPCRounds = 250;
-        paramset->numOpenedRounds = 36;
-        paramset->numMPCParties = 16;
-        paramset->numSboxes = 43;
-        paramset->numRounds = 4;
-        paramset->digestSizeBytes = 32;
-
-	paramset->andSizeBytes = ToBytes(paramset->numSboxes * 3 * paramset->numRounds);
-	paramset->stateSizeBytes = ToBytes(paramset->stateSizeBits);
-	paramset->seedSizeBytes = ToBytes(2 * pqSecurityLevel);
-	paramset->stateSizeWords = (paramset->stateSizeBits + WORD_SIZE_BITS - 1)/ WORD_SIZE_BITS;
-	paramset->saltSizeBytes = 32; /* same for all parameter sets */
-
-	tree_t * treeCV = NULL;
-	commitments_t Ch = {0};
-	commitments_t Cv = {0};
-	
-	uint8_t * saltAndRoot = malloc(params->saltSizeBytes + params->seedSizeBytes);
-
-	computeSaltAndRootSeed(saltAndRoot, params->saltSizeBytes + params->seedSizeBytes, privateKey, pubKey, plaintext, message, messageByteLength, params);			
-	memcpy(sig->salt, saltAndRoot, params->saltSizeBytes);
-	tree_t* iSeedsTree = generateSeeds(params->numMPCRounds, saltAndRoot + params->saltSizeBytes, sig->salt, 0, params);    
-	uint8_t** iSeeds = getLeaves(iSeedsTree);
-	free(saltAndRoot);	
-
-	randomTape_t* tapes = malloc(params->numMPCRounds * sizeof(randomTape_t));
-	tree_t** seeds = malloc(params->numMPCRounds * sizeof(tree_t*));
-	for (size_t t = 0; t < params->numMPCRounds; t++) 
-	{
-		seeds[t] = generateSeeds(params->numMPCParties, iSeeds[t], sig->salt, t, params);
-		createRandomTapes(&tapes[t], getLeaves(seeds[t]), sig->salt, t, params);
-	}
-
-
-/*
-	clock_t begin = clock(), delta, deltaA;
-	unsigned char rs[NUM_ROUNDS][3][4];
-	unsigned char keys[NUM_ROUNDS][3][16];
+	unsigned char rs[NUM_ROUNDS][NUM_PARTIES][4];
+	unsigned char keys[NUM_ROUNDS][NUM_PARTIES][16];
 	a as[NUM_ROUNDS];
-	View localViews[NUM_ROUNDS][3];
-	int totalCrypto = 0;
-	
-	//Generating keys
-	clock_t beginCrypto = clock(), deltaCrypto;
-	if(RAND_bytes(keys, NUM_ROUNDS*3*16) != 1) {
+	View localViews[NUM_ROUNDS][NUM_PARTIES];
+        //Generating keys
+	Compute_RAND(keys, NUM_ROUNDS*NUM_PARTIES*16,input,strlen(userInput)) != 1) 
+
+	if(RAND_bytes(rs, NUM_ROUNDS*NUM_PARTIES*4) != 1) {   // still need this?
 		printf("RAND_bytes failed crypto, aborting\n");
 		return 0;
 	}
-	if(RAND_bytes(rs, NUM_ROUNDS*3*4) != 1) {
-		printf("RAND_bytes failed crypto, aborting\n");
-		return 0;
+
+        //Sharing secrets
+	unsigned char shares[NUM_ROUNDS][NUM_PARTIES][SHA256_INPUTS];
+	for (int j=0;j<NUM_ROUNDS;j++)
+	{
+		Compute_RAND(&(shares[j]),NUM_PARTIES*SHA256_INPUTS,keys[j],16);
 	}
-	deltaCrypto = clock() - beginCrypto;
-	int inMilliCrypto = deltaCrypto * 1000 / CLOCKS_PER_SEC;
-	totalCrypto = inMilliCrypto;
-	
-	//Sharing secrets
-	clock_t beginSS = clock(), deltaSS;
-	unsigned char shares[NUM_ROUNDS][3][i];
-	if(RAND_bytes(shares, NUM_ROUNDS*3*i) != 1) {
-		printf("RAND_bytes failed crypto, aborting\n");
-		return 0;
-	}
+
+        //Generating randomness
+	unsigned char *randomness[NUM_ROUNDS][NUM_PARTIES];
 	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
-
-		for (int j = 0; j < i; j++) {
-			shares[k][2][j] = input[j] ^ shares[k][0][j] ^ shares[k][1][j];
-		}
-
-	}
-	deltaSS = clock() - beginSS;
-	int inMilli = deltaSS * 1000 / CLOCKS_PER_SEC;
-	totalSS = inMilli;
-
-	//Generating randomness
-	clock_t beginRandom = clock(), deltaRandom;
-	unsigned char *randomness[NUM_ROUNDS][3];
-	#pragma omp parallel for
-	for(int k=0; k<NUM_ROUNDS; k++) {
-		for(int j = 0; j<3; j++) {
-			randomness[k][j] = malloc(2912*sizeof(unsigned char));
+		for(int j = 0; j<NUM_PARTIES; j++) {
+			randomness[k][j] = malloc(rSize*sizeof(unsigned char));
 			getAllRandomness(keys[k][j], randomness[k][j]);
 		}
 	}
 
-	deltaRandom = clock() - beginRandom;
-	inMilli = deltaRandom * 1000 / CLOCKS_PER_SEC;
-	totalRandom = inMilli;
-*/
-	inputs_t inputs = allocateInputs(params); 
-	uint8_t auxBits[MAX_AUX_BYTES]={0,};
-	for (size_t t = 0; t < params->numMPCRounds; t++) 
+	//compute AUX Tape
+	for (int k = 0; k<NUM_ROUNDS;k++)
 	{
-		computeAuxTape(&tapes[t], inputs[t], params);
+		computeAuxTape(randomness[k],shares[k],
 	}
 
-	//Running MPC-SHA2
-	clock_t beginSha = clock(), deltaSha;
+	//Running MPC-SHA2 online
 	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		as[k] = commit(i, shares[k], randomness[k], rs[k], localViews[k]);
-		for(int j=0; j<3; j++) {
+		for(int j=0; j<NUM_PARTIES; j++) {
 			free(randomness[k][j]);
 		}
 	}
-	deltaSha = clock() - beginSha;
-	inMilli = deltaSha * 1000 / CLOCKS_PER_SEC;
-	totalSha = inMilli;
 	
 	//Committing
-	clock_t beginHash = clock(), deltaHash;
 	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		unsigned char hash1[SHA256_DIGEST_LENGTH];
@@ -751,35 +694,24 @@ int main(void) {
 		H(keys[k][2], localViews[k][2], rs[k][2], hash1);
 		memcpy(as[k].h[2], hash1, 32);
 	}
-	deltaHash = clock() - beginHash;
-				inMilli = deltaHash * 1000 / CLOCKS_PER_SEC;
-				totalHash += inMilli;
 				
-	deltaA = clock() - begin;
-	int inMilliA = deltaA * 1000 / CLOCKS_PER_SEC;
 
 	//Generating E
-	clock_t beginE = clock(), deltaE;
 	int es[NUM_ROUNDS];
 	uint32_t finalHash[8];
 	for (int j = 0; j < 8; j++) {
 		finalHash[j] = as[0].yp[0][j]^as[0].yp[1][j]^as[0].yp[2][j];
 	}
 	H3(finalHash, as, NUM_ROUNDS, es);
-	deltaE = clock() - beginE;
-	int inMilliE = deltaE * 1000 / CLOCKS_PER_SEC;
 
 
 	//Packing Z
-	clock_t beginZ = clock(), deltaZ;
 	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
 
 	#pragma omp parallel for
 	for(int i = 0; i<NUM_ROUNDS; i++) {
 		zs[i] = prove(es[i],keys[i],rs[i], localViews[i]);
 	}
-	deltaZ = clock() - beginZ;
-	int inMilliZ = deltaZ * 1000 / CLOCKS_PER_SEC;
 	
 	
 	//Writing to file
@@ -798,35 +730,12 @@ int main(void) {
 
 	fclose(file);
 
-	clock_t deltaWrite = clock()-beginWrite;
 	free(zs);
-	int inMilliWrite = deltaWrite * 1000 / CLOCKS_PER_SEC;
 
-
-	delta = clock() - begin;
-	inMilli = delta * 1000 / CLOCKS_PER_SEC;
 
 	int sumOfParts = 0;
 
-	printf("Generating A: %ju\n", (uintmax_t)inMilliA);
-	printf("	Generating keys: %ju\n", (uintmax_t)totalCrypto);
-	sumOfParts += totalCrypto;
-	printf("	Generating randomness: %ju\n", (uintmax_t)totalRandom);
-	sumOfParts += totalRandom;
-	printf("	Sharing secrets: %ju\n", (uintmax_t)totalSS);
-	sumOfParts += totalSS;
-	printf("	Running MPC-SHA2: %ju\n", (uintmax_t)totalSha);
-	sumOfParts += totalSha;
-	printf("	Committing: %ju\n", (uintmax_t)totalHash);
-	sumOfParts += totalHash;
-	printf("	*Accounted for*: %ju\n", (uintmax_t)sumOfParts);
-	printf("Generating E: %ju\n", (uintmax_t)inMilliE);
-	printf("Packing Z: %ju\n", (uintmax_t)inMilliZ);
-	printf("Writing file: %ju\n", (uintmax_t)inMilliWrite);
-	printf("Total: %d\n",inMilli);
-	printf("\n");
 	printf("Proof output to file %s", outputFile);
-
 
 
 	openmp_thread_cleanup();
