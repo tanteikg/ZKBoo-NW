@@ -415,7 +415,7 @@ void mpc_XOR(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 	}
 }
 
-void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char *randomness[NUM_PARTIES], int* randCount) {
+void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
         uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
         *randCount += 4;
         uint32_t t[3] = { 0 };
@@ -428,7 +428,7 @@ void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
         z[2] = t[2];
 }
 
-void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char *randomness[NUM_PARTIES], int* randCount) {
+void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 	uint32_t c[3] = { 0 };
 	uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
 	*randCount += 4;
@@ -464,7 +464,7 @@ void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 
 }
 
-void aux_ADDK(uint32_t x[NUM_PARTIES], uint32_t y, uint32_t z[NUM_PARTIES], unsigned char *randomness[NUM_PARTIES], int* randCount) {
+void aux_ADDK(uint32_t x[NUM_PARTIES], uint32_t y, uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 	uint32_t c[NUM_PARTIES] = { 0 };
 	uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
 	*randCount += 4;
@@ -502,23 +502,23 @@ void aux_ADDK(uint32_t x[NUM_PARTIES], uint32_t y, uint32_t z[NUM_PARTIES], unsi
 
 }
 
-void aux_MAJ(uint32_t a[NUM_PARTIES], uint32_t b[NUM_PARTIES], uint32_t c[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char *randomness[NUM_PARTIES], int* randCount) {
+void aux_MAJ(uint32_t a[NUM_PARTIES], uint32_t b[NUM_PARTIES], uint32_t c[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 	uint32_t t0[NUM_PARTIES];
 	uint32_t t1[NUM_PARTIES];
 
 	mpc_XOR(a, b, t0);
 	mpc_XOR(a, c, t1);
-	mpc_AND(t0, t1, z, randomness, randCount);
+	aux_AND(t0, t1, z, randomness, randCount);
 	mpc_XOR(z, a, z);
 }
 
 
-void mpc_CH(uint32_t e[NUM_PARTIES], uint32_t f[NUM_PARTIES], uint32_t g[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char *randomness[NUM_PARTIES], int* randCount) {
+void aux_CH(uint32_t e[NUM_PARTIES], uint32_t f[NUM_PARTIES], uint32_t g[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 	uint32_t t0[NUM_PARTIES];
 
 	//e & (f^g) ^ g
 	mpc_XOR(f,g,t0);
-	mpc_AND(e,t0,t0, randomness, randCount);
+	aux_AND(e,t0,t0, randomness, randCount);
 	mpc_XOR(t0,g,z);
 
 }
