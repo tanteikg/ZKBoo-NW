@@ -81,9 +81,10 @@ static const uint32_t k[64] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 		0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2 };
 
 #define ySize 736
-#define rSize 2912
-#define NUM_PARTIES 16
-#define NUM_ROUNDS 100 
+//#define rSize 2912 
+#define rSize 6640 // 2912*2 = 5824 
+#define NUM_PARTIES 32 
+#define NUM_ROUNDS 10 
 #define SHA256_INPUTS 64
 
 typedef struct {
@@ -162,7 +163,7 @@ void getAllRandomness(unsigned char key[16], unsigned char randomness[rSize]) {
 
 uint32_t getRandom32(unsigned char randomness[rSize], int randCount) {
 	uint32_t ret;
-	memcpy(&ret, &randomness[randCount], 4);
+	memcpy(&ret, &randomness[randCount/8], 4);
 	return ret;
 }
 
@@ -298,6 +299,63 @@ void openmp_thread_cleanup(void)
   OPENSSL_free(locks);
 }
 
+// from Picnic Project
+//
+/* Get one bit from a byte array */
+uint8_t getBit(const uint8_t* array, uint32_t bitNumber)
+{
+	return (array[bitNumber / 8] >> (7 - (bitNumber % 8))) & 0x01;
+}
+
+/* Get one bit from a 32-bit int array */
+uint8_t getBitFromWordArray(const uint32_t* array, uint32_t bitNumber)
+{
+	return getBit((uint8_t*)array, bitNumber);
+}
+
+/* Set a specific bit in a byte array to a given value */
+void setBit(uint8_t* bytes, uint32_t bitNumber, uint8_t val)
+{
+	bytes[bitNumber / 8] = (bytes[bitNumber >> 3]
+				& ~(1 << (7 - (bitNumber % 8)))) | (val << (7 - (bitNumber % 8)));
+}
+
+static uint32_t parity32(uint32_t x)
+{
+	uint32_t y = x ^ (x >> 1);
+
+	y ^= (y >> 2);
+	y ^= (y >> 4);
+	y ^= (y >> 8);
+	y ^= (y >> 16);
+	return y & 1;
+}
+
+static uint32_t int32ToWord(uint32_t x[NUM_PARTIES], int posn)
+{
+	uint32_t shares;
+
+	for (size_t i = 0; i < NUM_PARTIES;i++) // NUM_PARTIES = 32 
+	{
+		uint8_t bit = getBit((uint8_t*)&x[i],posn);
+		setBit((uint8_t*)&shares,i,bit);
+	}
+	return shares;
+
+}
+
+static uint32_t tapesToWord(unsigned char randomness[NUM_PARTIES][rSize],int * randCount)
+{
+	uint32_t shares;
+
+	for (size_t i = 0; i < NUM_PARTIES;i++) // NUM_PARTIES = 32 
+	{
+		uint8_t bit = getBit(randomness[i],*randCount);
+		setBit((uint8_t*)&shares,i,bit);
+	}
+	*randCount += 1;
+	return shares;
+}
 
 int mpc_AND_verify(uint32_t x[2], uint32_t y[2], uint32_t z[2], View ve, View ve1, unsigned char randomness[2][rSize], int* randCount, int* countY) {
 	uint32_t r[2] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount) };
@@ -415,91 +473,70 @@ void mpc_XOR(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 	}
 }
 
-void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
-        uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
-        *randCount += 4;
-        uint32_t t[3] = { 0 };
+void aux_bit_AND(uint32_t mask_a, uint32_t mask_b,unsigned char randomness[NUM_PARTIES][rSize], int *randCount)
+{
+	size_t lastParty = NUM_PARTIES-1;
+	uint32_t and_helper = tapesToWord(randomness,randCount);
+	setBit((uint8_t*)&and_helper,NUM_PARTIES-1,0);
+	uint8_t aux_bit = (mask_a & mask_b) ^ parity32(and_helper);
+	setBit(randomness[lastParty], *randCount-1,aux_bit);
+} 	
 
-        t[0] = (x[0] & y[1]) ^ (x[1] & y[0]) ^ (x[0] & y[0]) ^ r[0] ^ r[1];
-        t[1] = (x[1] & y[2]) ^ (x[2] & y[1]) ^ (x[1] & y[1]) ^ r[1] ^ r[2];
-        t[2] = (x[2] & y[0]) ^ (x[0] & y[2]) ^ (x[2] & y[2]) ^ r[2] ^ r[0];
-        z[0] = t[0];
-        z[1] = t[1];
-        z[2] = t[2];
+void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) 
+{
+	uint32_t mask_a,mask_b;
+
+	for (int i =0;i<NUM_PARTIES;i++)
+	{
+		z[i] = getRandom32(randomness[i],*randCount);
+	}
+	*randCount+=32;
+
+	for (int i = 0; i < sizeof(uint32_t);i++) 
+	{
+		mask_a = int32ToWord(x,i);  // we assume NUM_PARTIES = 32
+		mask_b = int32ToWord(y,i);
+
+		aux_bit_AND(mask_a,mask_b,randomness,randCount);
+		*randCount += 1;
+	}
+
 }
 
 void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
-	uint32_t c[3] = { 0 };
-	uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
-	*randCount += 4;
 
-	uint8_t a[3], b[3];
+	uint32_t carry[NUM_PARTIES] = { 0 };
+	uint32_t aANDb[NUM_PARTIES];
+	uint32_t cANDaXORb[NUM_PARTIES];
 
-	uint8_t t;
+	uint32_t mask_a,mask_b;
 
-	for(int i=0;i<31;i++)
+	for (int i =0;i<NUM_PARTIES;i++)
 	{
-		a[0]=GETBIT(x[0]^c[0],i);
-		a[1]=GETBIT(x[1]^c[1],i);
-		a[2]=GETBIT(x[2]^c[2],i);
-
-		b[0]=GETBIT(y[0]^c[0],i);
-		b[1]=GETBIT(y[1]^c[1],i);
-		b[2]=GETBIT(y[2]^c[2],i);
-
-		t = (a[0]&b[1]) ^ (a[1]&b[0]) ^ GETBIT(r[1],i);
-		SETBIT(c[0],i+1, t ^ (a[0]&b[0]) ^ GETBIT(c[0],i) ^ GETBIT(r[0],i));
-
-		t = (a[1]&b[2]) ^ (a[2]&b[1]) ^ GETBIT(r[2],i);
-		SETBIT(c[1],i+1, t ^ (a[1]&b[1]) ^ GETBIT(c[1],i) ^ GETBIT(r[1],i));
-
-		t = (a[2]&b[0]) ^ (a[0]&b[2]) ^ GETBIT(r[0],i);
-		SETBIT(c[2],i+1, t ^ (a[2]&b[2]) ^ GETBIT(c[2],i) ^ GETBIT(r[2],i));
-
-
+		aANDb[i] = getRandom32(randomness[i],*randCount);
+		cANDaXORb[i] = getRandom32(randomness[i],*randCount+32);
+		carry[i] = aANDb[i] | cANDaXORb[i];
 	}
-	z[0]=x[0]^y[0]^c[0];
-	z[1]=x[1]^y[1]^c[1];
-	z[2]=x[2]^y[2]^c[2];
+	*randCount+=64;
 
-}
-
-void aux_ADDK(uint32_t x[NUM_PARTIES], uint32_t y, uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
-	uint32_t c[NUM_PARTIES] = { 0 };
-	uint32_t r[3] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
-	*randCount += 4;
-
-	uint8_t a[3], b[3];
-
-	uint8_t t;
-
-	for(int i=0;i<31;i++)
+	for (int i = 0; i < sizeof(uint32_t);i++) 
 	{
-		a[0]=GETBIT(x[0]^c[0],i);
-		a[1]=GETBIT(x[1]^c[1],i);
-		a[2]=GETBIT(x[2]^c[2],i);
+		mask_a = int32ToWord(x,i);  // we assume NUM_PARTIES = 32
+		mask_b = int32ToWord(y,i);
 
-		b[0]=GETBIT(y^c[0],i);
-		b[1]=GETBIT(y^c[1],i);
-		b[2]=GETBIT(y^c[2],i);
+		aux_bit_AND(mask_a,mask_b,randomness,randCount);
+		*randCount += 1;
 
-		t = (a[0]&b[1]) ^ (a[1]&b[0]) ^ GETBIT(r[1],i);
-		SETBIT(c[0],i+1, t ^ (a[0]&b[0]) ^ GETBIT(c[0],i) ^ GETBIT(r[0],i));
-
-		t = (a[1]&b[2]) ^ (a[2]&b[1]) ^ GETBIT(r[2],i);
-		SETBIT(c[1],i+1, t ^ (a[1]&b[1]) ^ GETBIT(c[1],i) ^ GETBIT(r[1],i));
-
-		t = (a[2]&b[0]) ^ (a[0]&b[2]) ^ GETBIT(r[0],i);
-		SETBIT(c[2],i+1, t ^ (a[2]&b[2]) ^ GETBIT(c[2],i) ^ GETBIT(r[2],i));
-
-
+		mask_a ^= mask_b;	
+		mask_b = int32ToWord(carry,i);
+		aux_bit_AND(mask_a,mask_b,randomness,randCount);
+		*randCount += 1;
 	}
 
-	z[0]=x[0]^y^c[0];
-	z[1]=x[1]^y^c[1];
-	z[2]=x[2]^y^c[2];
-
-
+	for (int i =0;i<NUM_PARTIES;i++)
+	{
+		z[i]=x[i]^y[i]^carry[i];
+	}
 }
 
 void aux_MAJ(uint32_t a[NUM_PARTIES], uint32_t b[NUM_PARTIES], uint32_t c[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
@@ -526,9 +563,9 @@ void aux_CH(uint32_t e[NUM_PARTIES], uint32_t f[NUM_PARTIES], uint32_t g[NUM_PAR
 
 int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char shares[NUM_PARTIES][SHA256_INPUTS])
 {
-	int randCount;
+	int randCount = 0;
 
-	uint32_t w[64][3];
+	uint32_t w[64][NUM_PARTIES];
 
 	for (int i = 0; i < NUM_PARTIES; i++) {
 		for (int j = 0; j < 16; j++) {
@@ -584,6 +621,7 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 		h[i] = hA[7];
 	}
 	uint32_t temp1[NUM_PARTIES], temp2[NUM_PARTIES], maj[NUM_PARTIES];
+
 	for (int i = 0; i < 64; i++) {
 		//s1 = RIGHTROTATE(e,6) ^ RIGHTROTATE(e,11) ^ RIGHTROTATE(e,25);
 		mpc_RIGHTROTATE(e, 6, t0);
@@ -607,7 +645,12 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 		//t1 = t0 + t1 (h+s1+ch)
 		aux_ADD(t0, t1, t1, randomness, &randCount);
 
-		aux_ADDK(t1, k[i], t1, randomness, &randCount);
+		{
+			uint32_t temp3[NUM_PARTIES];
+			for (int j = 0;j < NUM_PARTIES;j++)
+			       temp3[j] = k[i];	
+			aux_ADD(t1, temp3, t1, randomness, &randCount);
+		}
 
 		aux_ADD(t1, w[i], temp1, randomness, &randCount);
 
