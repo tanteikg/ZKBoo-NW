@@ -113,66 +113,40 @@ void mpc_XOR(uint32_t x[3], uint32_t y[3], uint32_t z[3]) {
 
 */
 
-void mpc_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) 
+void mpc_AND(uint32_t x, uint32_t y, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) 
 {
-	uint32_t mask_a, mask_b, mask_z;
-
-	for (int i = 0; i < NUM_PARTIES;i++)
-		z[i] = getRandom32(randomness[i],*randCount;
-	*randCount+=32;
+	uint8_t mask_a, mask_b;
+	uint32_t aANDb, and_helper;
 
 	for (int i=0;i < 32;i++)
 	{
-		uint32_t and_helper = tapesToWord(randomness,randCount);
-		mask_a = int32ToWord(x,i);
-		mask_b = int32ToWord(y,i);
-		mask_z = int32ToWord(z,i);
+		aANDb = tapesToWord(randomness,randCount);
+		and_helper = tapesToWord(randomness,randCount);
+		mask_a = getBit((uint8_t*)&x,i);
+		mask_b = getBit((uint8_t*)&y,i);
 
 	}
 
-	views[0].y[*countY] = z[0];
-	views[1].y[*countY] = z[1];
-	views[2].y[*countY] = z[2];
+	//views[0].y[*countY] = z;
 	(*countY)++;
 }
 
-void mpc_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
-	uint32_t c[NUM_PARTIES] = { 0 };
-	uint32_t r[NUM_PARTIES] = { getRandom32(randomness[0], *randCount), getRandom32(randomness[1], *randCount), getRandom32(randomness[2], *randCount)};
-	*randCount += 4;
-
-	uint8_t a[NUM_PARTIES], b[NUM_PARTIES];
+void mpc_ADD(uint32_t x, uint32_t y, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
 
 	uint8_t t;
+	uint8_t mask_a, mask_b; 
+	uint32_t aANDb, and_helper;
 
-	for(int i=0;i<31;i++)
+	for (int i=0;i < 32;i++)
 	{
-		a[0]=GETBIT(x[0]^c[0],i);
-		a[1]=GETBIT(x[1]^c[1],i);
-		a[2]=GETBIT(x[2]^c[2],i);
-
-		b[0]=GETBIT(y[0]^c[0],i);
-		b[1]=GETBIT(y[1]^c[1],i);
-		b[2]=GETBIT(y[2]^c[2],i);
-
-		t = (a[0]&b[1]) ^ (a[1]&b[0]) ^ GETBIT(r[1],i);
-		SETBIT(c[0],i+1, t ^ (a[0]&b[0]) ^ GETBIT(c[0],i) ^ GETBIT(r[0],i));
-
-		t = (a[1]&b[2]) ^ (a[2]&b[1]) ^ GETBIT(r[2],i);
-		SETBIT(c[1],i+1, t ^ (a[1]&b[1]) ^ GETBIT(c[1],i) ^ GETBIT(r[1],i));
-
-		t = (a[2]&b[0]) ^ (a[0]&b[2]) ^ GETBIT(r[0],i);
-		SETBIT(c[2],i+1, t ^ (a[2]&b[2]) ^ GETBIT(c[2],i) ^ GETBIT(r[2],i));
-
+		aANDb = tapesToWord(randomness,randCount);
+		and_helper = tapesToWord(randomness,randCount);
+		mask_a = getBit((uint8_t*)&x,i);
+		mask_b = getBit((uint8_t*)&y,i);
 
 	}
-	z[0]=x[0]^y[0]^c[0];
-	z[1]=x[1]^y[1]^c[1];
-	z[2]=x[2]^y[2]^c[2];
 
-	views[0].y[*countY] = c[0];
-	views[1].y[*countY] = c[1];
-	views[2].y[*countY] = c[2];
+	//views[0].y[*countY] = z;
 	*countY += 1;
 
 
@@ -180,30 +154,30 @@ void mpc_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 
 
 
-void mpc_MAJ(uint32_t a[NUM_PARTIES], uint32_t b[NUM_PARTIES], uint32_t c[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
-	uint32_t t0[NUM_PARTIES];
-	uint32_t t1[NUM_PARTIES];
+void mpc_MAJ(uint32_t a, uint32_t b, uint32_t c, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
+	uint32_t t0;
+	uint32_t t1;
 
-	mpc_XOR(a, b, t0);
-	mpc_XOR(a, c, t1);
+	mpc_XOR(a, b, &t0);
+	mpc_XOR(a, c, &t1);
 	mpc_AND(t0, t1, z, randomness, randCount, views, countY);
-	mpc_XOR(z, a, z);
+	mpc_XOR(*z, a, z);
 }
 
 
-void mpc_CH(uint32_t e[NUM_PARTIES], uint32_t f[NUM_PARTIES], uint32_t g[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
-	uint32_t t0[NUM_PARTIES];
+void mpc_CH(uint32_t e, uint32_t f, uint32_t g, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount, View views[NUM_PARTIES], int* countY) {
+	uint32_t t0;
 
 	//e & (f^g) ^ g
-	mpc_XOR(f,g,t0);
-	mpc_AND(e,t0,t0, randomness, randCount, views, countY);
+	mpc_XOR(f,g,&t0);
+	mpc_AND(e,t0,&t0, randomness, randCount, views, countY);
 	mpc_XOR(t0,g,z);
 
 }
 
 
 
-int mpc_sha256(unsigned char results[NUM_PARTIES][SHA256_DIGEST_LENGTH], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
+int mpc_sha256(unsigned char results[SHA256_DIGEST_LENGTH], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
 {
 
 	if (numBytes > 55)
@@ -214,81 +188,74 @@ int mpc_sha256(unsigned char results[NUM_PARTIES][SHA256_DIGEST_LENGTH], unsigne
 
 	int randCount=0;;
 
-	uint32_t w[64][NUM_PARTIES];
+	uint32_t w[64];
+	memset(w,0,sizeof(int32_t)*64);
 
 	for (int i = 0; i < NUM_PARTIES; i++) {
-		for (int j = 0; j < numBytes;j++)
+		if (i == 0)
+		{
+			for (int j = 0; j < numBytes;j++)
 			shares[i][j] ^= inputs[j];
-		shares[i][numBytes] ^= 0x80;
+			shares[i][numBytes] ^= 0x80;
 		//Last 8 chars used for storing length of input without padding, in big-endian.
 		//Since we only care for one block, we are safe with just using last 9 bits and 0'ing the rest
 
 		//chunk[60] = numBits >> 24;
 		//chunk[61] = numBits >> 16;
-		shares[i][62] ^= numBytes >> 5;
-		shares[i][63] ^= (numBytes * 8)&0xFF;
-		memcpy(views[i].x, shares[i], 64);
-
+			shares[i][62] ^= numBytes >> 5;
+			shares[i][63] ^= (numBytes * 8)&0xFF;
+		}
 		for (int j = 0; j < 16; j++) {
-			w[j][i] = (shares[i][j * 4] << 24) | (shares[i][j * 4 + 1] << 16)
+			w[j] ^= (shares[i][j * 4] << 24) | (shares[i][j * 4 + 1] << 16)
 							| (shares[i][j * 4 + 2] << 8) | shares[i][j * 4 + 3];
 		}
+		//memcpy(views[i].x, w[i], 64);
 	}
 
-	uint32_t s0[NUM_PARTIES], s1[NUM_PARTIES];
-	uint32_t t0[NUM_PARTIES], t1[NUM_PARTIES];
+	uint32_t s0, s1;
+	uint32_t t0, t1;
 	for (int j = 16; j < 64; j++) {
 		//s0[i] = RIGHTROTATE(w[i][j-15],7) ^ RIGHTROTATE(w[i][j-15],18) ^ (w[i][j-15] >> 3);
-		mpc_RIGHTROTATE(w[j-15], 7, t0);
+		mpc_RIGHTROTATE(w[j-15], 7, &t0);
 
-		mpc_RIGHTROTATE(w[j-15], 18, t1);
-		mpc_XOR(t0, t1, t0);
-		mpc_RIGHTSHIFT(w[j-15], 3, t1);
-		mpc_XOR(t0, t1, s0);
+		mpc_RIGHTROTATE(w[j-15], 18, &t1);
+		mpc_XOR(t0, t1, &t0);
+		mpc_RIGHTSHIFT(w[j-15], 3, &t1);
+		mpc_XOR(t0, t1, &s0);
 
 		//s1[i] = RIGHTROTATE(w[i][j-2],17) ^ RIGHTROTATE(w[i][j-2],19) ^ (w[i][j-2] >> 10);
-		mpc_RIGHTROTATE(w[j-2], 17, t0);
-		mpc_RIGHTROTATE(w[j-2], 19, t1);
+		mpc_RIGHTROTATE(w[j-2], 17, &t0);
+		mpc_RIGHTROTATE(w[j-2], 19, &t1);
 
-		mpc_XOR(t0, t1, t0);
-		mpc_RIGHTSHIFT(w[j-2], 10, t1);
-		mpc_XOR(t0, t1, s1);
+		mpc_XOR(t0, t1, &t0);
+		mpc_RIGHTSHIFT(w[j-2], 10, &t1);
+		mpc_XOR(t0, t1, &s1);
 
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
 
-		mpc_ADD(w[j-16], s0, t1, randomness, &randCount, views, countY);
-		mpc_ADD(w[j-7], t1, t1, randomness, &randCount, views, countY);
-		mpc_ADD(t1, s1, w[j], randomness, &randCount, views, countY);
+		mpc_ADD(w[j-16], s0, &t1, randomness, &randCount, views, countY);
+		mpc_ADD(w[j-7], t1, &t1, randomness, &randCount, views, countY);
+		mpc_ADD(t1, s1, &w[j], randomness, &randCount, views, countY);
 
 	}
-	uint32_t a[NUM_PARTIES];
-	uint32_t b[NUM_PARTIES];
-	uint32_t c[NUM_PARTIES];
-	uint32_t d[NUM_PARTIES];
-	uint32_t e[NUM_PARTIES];
-	uint32_t f[NUM_PARTIES];
-	uint32_t g[NUM_PARTIES];
-	uint32_t h[NUM_PARTIES];
-	for (int i = 0;i < NUM_PARTIES;i++)
-	{
-		a[i] = hA[0];
-		b[i] = hA[1];
-		c[i] = hA[2];
-		d[i] = hA[3];
-		e[i] = hA[4];
-		f[i] = hA[5];
-		g[i] = hA[6];
-		h[i] = hA[7];
-	}
-	uint32_t temp1[NUM_PARTIES], temp2[NUM_PARTIES], maj[NUM_PARTIES];
+	uint32_t a = hA[0];
+	uint32_t b = hA[1];
+	uint32_t c = hA[2];
+	uint32_t d = hA[3];
+	uint32_t e = hA[4];
+	uint32_t f = hA[5];
+	uint32_t g = hA[6];
+	uint32_t h = hA[7];
+
+	uint32_t temp1, temp2, temp3, maj;
 	for (int i = 0; i < 64; i++) {
 		//s1 = RIGHTROTATE(e,6) ^ RIGHTROTATE(e,11) ^ RIGHTROTATE(e,25);
-		mpc_RIGHTROTATE(e, 6, t0);
-		mpc_RIGHTROTATE(e, 11, t1);
-		mpc_XOR(t0, t1, t0);
+		mpc_RIGHTROTATE(e, 6, &t0);
+		mpc_RIGHTROTATE(e, 11, &t1);
+		mpc_XOR(t0, t1, &t0);
 
-		mpc_RIGHTROTATE(e, 25, t1);
-		mpc_XOR(t0, t1, s1);
+		mpc_RIGHTROTATE(e, 25, &t1);
+		mpc_XOR(t0, t1, &s1);
 
 
 		//ch = (e & f) ^ ((~e) & g);
@@ -296,76 +263,67 @@ int mpc_sha256(unsigned char results[NUM_PARTIES][SHA256_DIGEST_LENGTH], unsigne
 
 		//t0 = h + s1
 
-		mpc_ADD(h, s1, t0, randomness, &randCount, views,countY);
+		mpc_ADD(h, s1, &t0, randomness, &randCount, views,countY);
 
 
-		mpc_CH(e, f, g, t1, randomness, &randCount, views, countY);
+		mpc_CH(e, f, g, &t1, randomness, &randCount, views, countY);
 
 		//t1 = t0 + t1 (h+s1+ch)
-		mpc_ADD(t0, t1, t1, randomness, &randCount, views, countY);
+		mpc_ADD(t0, t1, &t1, randomness, &randCount, views, countY);
 
-		{
-			uint32_t temp3[NUM_PARTIES];
-			for (int j = 0; j < NUM_PARTIES;j++)
-				temp3[j] = k[i];
-			mpc_ADDK(t1,temp3, t1, randomness, &randCount, views, countY);
-		}
+		temp3 = k[i];
+		mpc_ADD(t1,temp3, &t1, randomness, &randCount, views, countY);
 
-		mpc_ADD(t1, w[i], temp1, randomness, &randCount, views, countY);
+		mpc_ADD(t1, w[i], &temp1, randomness, &randCount, views, countY);
 
 		//s0 = RIGHTROTATE(a,2) ^ RIGHTROTATE(a,13) ^ RIGHTROTATE(a,22);
-		mpc_RIGHTROTATE(a, 2, t0);
-		mpc_RIGHTROTATE(a, 13, t1);
-		mpc_XOR(t0, t1, t0);
-		mpc_RIGHTROTATE(a, 22, t1);
-		mpc_XOR(t0, t1, s0);
+		mpc_RIGHTROTATE(a, 2, &t0);
+		mpc_RIGHTROTATE(a, 13, &t1);
+		mpc_XOR(t0, t1, &t0);
+		mpc_RIGHTROTATE(a, 22, &t1);
+		mpc_XOR(t0, t1, &s0);
 
 
-		mpc_MAJ(a, b, c, maj, randomness, &randCount, views, countY);
+		mpc_MAJ(a, b, c, &maj, randomness, &randCount, views, countY);
 
 		//temp2 = s0+maj;
-		mpc_ADD(s0, maj, temp2, randomness, &randCount, views, countY);
+		mpc_ADD(s0, maj, &temp2, randomness, &randCount, views, countY);
 
-		memcpy(h, g, sizeof(uint32_t) * 3);
-		memcpy(g, f, sizeof(uint32_t) * 3);
-		memcpy(f, e, sizeof(uint32_t) * 3);
+		h=g;
+		g=f;
+		f=e;
 		//e = d+temp1;
-		mpc_ADD(d, temp1, e, randomness, &randCount, views, countY);
-		memcpy(d, c, sizeof(uint32_t) * 3);
-		memcpy(c, b, sizeof(uint32_t) * 3);
-		memcpy(b, a, sizeof(uint32_t) * 3);
+		mpc_ADD(d, temp1, &e, randomness, &randCount, views, countY);
+		d=c;
+		c=b;
+		b=a;
 		//a = temp1+temp2;
 
-		mpc_ADD(temp1, temp2, a, randomness, &randCount, views, countY);
+		mpc_ADD(temp1, temp2, &a, randomness, &randCount, views, countY);
 	}
-	uint32_t hHa[8][NUM_PARTIES];
+
+	uint32_t hHa[8];
 	for (int i = 0;i < 8;i++)
 	{
-		for (int j = 0;j < NUM_PARTIES;j++)
-			hHa[i][j] = hA[i];
+			hHa[i] = hA[i];
 	}
-	mpc_ADD(hHa[0], a, hHa[0], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[1], b, hHa[1], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[2], c, hHa[2], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[3], d, hHa[3], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[4], e, hHa[4], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[5], f, hHa[5], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[6], g, hHa[6], randomness, &randCount, views, countY);
-	mpc_ADD(hHa[7], h, hHa[7], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[0], a, &hHa[0], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[1], b, &hHa[1], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[2], c, &hHa[2], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[3], d, &hHa[3], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[4], e, &hHa[4], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[5], f, &hHa[5], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[6], g, &hHa[6], randomness, &randCount, views, countY);
+	mpc_ADD(hHa[7], h, &hHa[7], randomness, &randCount, views, countY);
 
 	for (int i = 0; i < 8; i++) {
-		mpc_RIGHTSHIFT(hHa[i], 24, t0);
-		for (int j = 0;j< NUM_PARTIES;j++)
-			results[j][i * 4] = t0[j];
-		mpc_RIGHTSHIFT(hHa[i], 16, t0);
-		for (int j = 0;j< NUM_PARTIES;j++)
-			results[j][i * 4 + 1] = t0[j];
-		mpc_RIGHTSHIFT(hHa[i], 8, t0);
-		for (int j = 0;j< NUM_PARTIES;j++)
-			results[j][i * 4 + 2] = t0[j];
-
-		for (int j = 0;j< NUM_PARTIES;j++)
-			results[j][i * 4 + 3] = hHa[i][j];
+		mpc_RIGHTSHIFT(hHa[i], 24, &t0);
+		results[i * 4] = t0;
+		mpc_RIGHTSHIFT(hHa[i], 16, &t0);
+		results[i * 4 + 1] = t0;
+		mpc_RIGHTSHIFT(hHa[i], 8, &t0);
+		results[i * 4 + 2] = t0;
+		results[i * 4 + 3] = hHa[i];
 	}
 
 	return 0;
@@ -463,7 +421,7 @@ int main(int argc, char * argv[])
 		}
 	}
 	//compute AUX Tape
-	unsigned char com[NUM_PARTIES][SHA256_DIGEST_LENGTH];
+	unsigned char com[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
 	unsigned char commitedH[SHA256_DIGEST_LENGTH];
 	SHA256_CTX ctx;
 	for (int k = 0; k<NUM_ROUNDS;k++)
@@ -478,26 +436,29 @@ int main(int argc, char * argv[])
 
 
 	//Running MPC-SHA2 online
-	unsigned char result[NUM_ROUNDS][NUM_PARTIES][SHA256_DIGEST_LENGTH];
+	unsigned char result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
 	View localViews[NUM_ROUNDS][NUM_PARTIES];
 //	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		int countY = 0;
+		printf("shares:");
+		for (int l=0;l<NUM_PARTIES;l++)
+		{
+			printf("party %d:",l);
+		for (int j=0;j<10;j++)
+		{
+			printf("%02X",shares[k][l][j]);
+		}
+		printf("\n");
+		}
+		
 		mpc_sha256(result[k],shares[k],input, i, randomness[k], localViews[k],&countY);
-		for(int i = 0; i<8; i++) 
-		{
-			for (int j = 0;j < NUM_PARTIES;j++)
-			{
-				localViews[k][j].y[countY] = (result[k][j][i * 4] << 24) | (result[k][j][i * 4 + 1] << 16)
-								| (result[k][j][i * 4 + 2] << 8) | result[k][j][i * 4 + 3];
-				countY += 1;
-			}
-		}
-		for (int j = 0;j < NUM_PARTIES;j++)
-		{
-			memcpy(as[k].yp[j], result[k][j], 32);
-		}
+		printf("result of hash:");
+		for (int j=0;j<SHA256_DIGEST_LENGTH;j++)
+			printf("%02X",result[k][j]);
+		printf("\n");
 	}
+
 /*
 	//Committing
 //	#pragma omp parallel for
@@ -551,9 +512,9 @@ int main(int argc, char * argv[])
 	int sumOfParts = 0;
 
 	printf("Proof output to file %s", outputFile);
-*/
 
 	openmp_thread_cleanup();
 	cleanup_EVP();
+*/
 	return EXIT_SUCCESS;
 }
