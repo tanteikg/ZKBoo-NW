@@ -301,16 +301,43 @@ void openmp_thread_cleanup(void)
 
 // from Picnic Project
 //
+/* For an input bit b = 0 or 1, return the word of all b bits, i.e.,
+ * extend(1) = 0xFFFFFFFFFFFFFFFF
+ * extend(0) = 0x0000000000000000
+ * Assumes inputs are always 0 or 1.  If this doesn't hold, add "& 1" to the
+ * input.
+ */
+static uint32_t extend(uint8_t bit)
+{
+    return ~(bit - 1);
+}
+
 /* Get one bit from a byte array */
 uint8_t getBit(const uint8_t* array, uint32_t bitNumber)
 {
 	return (array[bitNumber / 8] >> (7 - (bitNumber % 8))) & 0x01;
 }
 
-/* Get one bit from a 32-bit int array */
-uint8_t getBitFromWordArray(const uint32_t* array, uint32_t bitNumber)
+uint8_t getParityFromWordArray(uint32_t * array, uint32_t size, uint32_t bitNumber)
 {
-	return getBit((uint8_t*)array, bitNumber);
+	uint8_t parity = 0;
+
+	for (int i=0;i<size;i++)
+	{
+		parity ^= getBit((uint8_t *)array,bitNumber);
+	}
+	return parity;
+}
+
+
+/* Get one bit from a 32-bit int array for all parties*/
+uint32_t getBitFromWordArray(const uint32_t* array, uint32_t size, uint32_t bitNumber)
+{
+	if (size == 1)
+		return getBit((uint8_t*)&array[0], bitNumber);
+	else
+		return getBit((uint8_t*)&array[size-1], bitNumber)+ (getBitFromWordArray(array,size-1,bitNumber)<<1);
+	
 }
 
 /* Set a specific bit in a byte array to a given value */
@@ -319,6 +346,8 @@ void setBit(uint8_t* bytes, uint32_t bitNumber, uint8_t val)
 	bytes[bitNumber / 8] = (bytes[bitNumber >> 3]
 				& ~(1 << (7 - (bitNumber % 8)))) | (val << (7 - (bitNumber % 8)));
 }
+
+
 
 static uint32_t parity32(uint32_t x)
 {
@@ -440,23 +469,27 @@ int mpc_CH_verify(uint32_t e[2], uint32_t f[2], uint32_t g[2], uint32_t z[2], Vi
 	return 0;
 }
 
-void mpc_RIGHTROTATE(uint32_t x, int j, uint32_t *z) {
+void mpc_RIGHTROTATE(uint32_t x[NUM_PARTIES], int j, uint32_t z[NUM_PARTIES]) {
 
-	*z = RIGHTROTATE(x, j);
+	for (int i=0; i < NUM_PARTIES;i++)
+		z[i] = RIGHTROTATE(x[i], j);
 }
 
-void mpc_RIGHTSHIFT(uint32_t x, int j, uint32_t *z) {
-	*z = x >> j;
+void mpc_RIGHTSHIFT(uint32_t x[NUM_PARTIES], int j, uint32_t z[NUM_PARTIES]) {
+	for (int i=0; i < NUM_PARTIES;i++)
+		z[i] = x[i] >> j;
 }
 
-void mpc_NEGATE(uint32_t x, uint32_t *z) 
+void mpc_NEGATE(uint32_t x[NUM_PARTIES], uint32_t z[NUM_PARTIES]) 
 {
-	*z = ~x;
+	for (int i=0; i < NUM_PARTIES;i++)
+		z[i] = ~x[i];
 }
 
-void mpc_XOR(uint32_t x, uint32_t y, uint32_t *z) 
+void mpc_XOR(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES]) 
 {
-	*z = x ^ y;
+	for (int i=0; i < NUM_PARTIES;i++)
+		z[i] = x[i] ^ y[i];
 }
 
 int32_t aux_bit_AND(uint32_t mask_a, uint32_t mask_b, unsigned char randomness[NUM_PARTIES][rSize], int *randCount)
@@ -472,64 +505,78 @@ int32_t aux_bit_AND(uint32_t mask_a, uint32_t mask_b, unsigned char randomness[N
 	return output_mask;
 } 	
 
-void aux_AND(uint32_t x, uint32_t y, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount) 
+void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) 
 {
 	uint8_t mask_a,mask_b;
-	uint32_t output_mask;
+	uint32_t output_mask; // NUM_PARTIES=32
 
 	for (int i = 0; i < 32;i++) 
 	{
-		mask_a = getBit((uint8_t*)&x,i);  // we assume NUM_PARTIES = 32
-		mask_b = getBit((uint8_t*)&y,i);
+		mask_a = getParityFromWordArray(x,NUM_PARTIES,i);  
+		mask_b = getParityFromWordArray(y,NUM_PARTIES,i);  
 
 		output_mask = aux_bit_AND(mask_a,mask_b,randomness,randCount);
-		setBit((uint8_t*)z,i,parity32(output_mask));
+
+		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
+		{
+			setBit((uint8_t *)&z[j],i,output_mask & 0x01);
+			output_mask>>=1;
+		}
 	}
 
 
 }
 
-void aux_ADD(uint32_t x, uint32_t y, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
+void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 
 	uint32_t aANDb,cANDaXORb;
-	uint32_t carry = 0;
+	uint32_t carry[NUM_PARTIES] = {0};
 
 	uint8_t mask_a,mask_b;
 
 	for (int i = 0; i < 32;i++) 
 	{
-		mask_a = getBit((uint8_t*)&x,i);  // we assume NUM_PARTIES = 32
-		mask_b = getBit((uint8_t*)&y,i);
+		mask_a = getParityFromWordArray(x,NUM_PARTIES,i);  
+		mask_b = getParityFromWordArray(y,NUM_PARTIES,i);  
 
 		aANDb = aux_bit_AND(mask_a,mask_b,randomness,randCount);
 
 		mask_a ^= mask_b;	
-		mask_b = getBit((uint8_t*)&carry,i);
+		mask_b = getParityFromWordArray(carry,NUM_PARTIES,i);  
 		cANDaXORb=aux_bit_AND(mask_a,mask_b,randomness,randCount);
-		setBit((uint8_t*)z,i,mask_a^mask_b);
+
+		aANDb |= cANDaXORb;
 		if (i < 31)
-			setBit((uint8_t*)&carry,i+1,aANDb | cANDaXORb);
+		{
+			for (int j = (NUM_PARTIES-1); j >= 0; j--)
+			{
+				setBit((uint8_t*)&carry[j],i+1,aANDb);
+				aANDb >>= 1;
+			}
+		}
 	}
+	for (int i=0;i<NUM_PARTIES;i++)
+		z[i] = x[i]^y[i]^carry[i];
 
 }
 
-void aux_MAJ(uint32_t a, uint32_t b, uint32_t c, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
-	uint32_t t0;
-	uint32_t t1;
+void aux_MAJ(uint32_t a[NUM_PARTIES], uint32_t b[NUM_PARTIES], uint32_t c[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
+	uint32_t t0[NUM_PARTIES];
+	uint32_t t1[NUM_PARTIES];
 
-	mpc_XOR(a, b, &t0);
-	mpc_XOR(a, c, &t1);
+	mpc_XOR(a, b, t0);
+	mpc_XOR(a, c, t1);
 	aux_AND(t0, t1, z, randomness, randCount);
-	mpc_XOR(*z, a, z);
+	mpc_XOR(z, a, z);
 }
 
 
-void aux_CH(uint32_t e, uint32_t f, uint32_t g, uint32_t *z, unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
-	uint32_t t0;
+void aux_CH(uint32_t e[NUM_PARTIES], uint32_t f[NUM_PARTIES], uint32_t g[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
+	uint32_t t0[NUM_PARTIES]; 
 
 	//e & (f^g) ^ g
-	mpc_XOR(f,g,&t0);
-	aux_AND(e,t0,&t0, randomness, randCount);
+	mpc_XOR(f,g,t0);
+	aux_AND(e,t0,t0, randomness, randCount);
 	mpc_XOR(t0,g,z);
 
 }
@@ -539,61 +586,73 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 {
 	int randCount = 0;
 
-	uint32_t w[64];
+	uint32_t w[64][NUM_PARTIES];
 
-	memset(w,0,sizeof(int32_t)*64);
+	memset(w,0,sizeof(int32_t)*64*NUM_PARTIES);
 	for (int i = 0; i < NUM_PARTIES; i++) {
 		for (int j = 0; j < 16; j++) {
-			w[j] ^= (shares[i][j * 4] << 24) | (shares[i][j * 4 + 1] << 16)
+			w[j][i] = (shares[i][j * 4] << 24) | (shares[i][j * 4 + 1] << 16)
 							| (shares[i][j * 4 + 2] << 8) | shares[i][j * 4 + 3];
 		}
 	}
 
-	uint32_t s0, s1;
-	uint32_t t0, t1;
+	uint32_t s0[NUM_PARTIES], s1[NUM_PARTIES];
+	uint32_t t0[NUM_PARTIES], t1[NUM_PARTIES];
 	for (int j = 16; j < 64; j++) {
 		//s0[i] = RIGHTROTATE(w[i][j-15],7) ^ RIGHTROTATE(w[i][j-15],18) ^ (w[i][j-15] >> 3);
-		mpc_RIGHTROTATE(w[j-15], 7, &t0);
+		mpc_RIGHTROTATE(w[j-15], 7, t0);
 
-		mpc_RIGHTROTATE(w[j-15], 18, &t1);
-		mpc_XOR(t0, t1, &t0);
-		mpc_RIGHTSHIFT(w[j-15], 3, &t1);
-		mpc_XOR(t0, t1, &s0);
+		mpc_RIGHTROTATE(w[j-15], 18, t1);
+		mpc_XOR(t0, t1, t0);
+		mpc_RIGHTSHIFT(w[j-15], 3, t1);
+		mpc_XOR(t0, t1, s0);
 
 		//s1[i] = RIGHTROTATE(w[i][j-2],17) ^ RIGHTROTATE(w[i][j-2],19) ^ (w[i][j-2] >> 10);
-		mpc_RIGHTROTATE(w[j-2], 17, &t0);
-		mpc_RIGHTROTATE(w[j-2], 19, &t1);
+		mpc_RIGHTROTATE(w[j-2], 17, t0);
+		mpc_RIGHTROTATE(w[j-2], 19, t1);
 
-		mpc_XOR(t0, t1, &t0);
-		mpc_RIGHTSHIFT(w[j-2], 10, &t1);
-		mpc_XOR(t0, t1, &s1);
+		mpc_XOR(t0, t1, t0);
+		mpc_RIGHTSHIFT(w[j-2], 10, t1);
+		mpc_XOR(t0, t1, s1);
 
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
 
-		aux_ADD(w[j-16], s0, &t1, randomness, &randCount);
-		aux_ADD(w[j-7], t1, &t1, randomness, &randCount);
-		aux_ADD(t1, s1, &w[j], randomness, &randCount);
+		aux_ADD(w[j-16], s0, t1, randomness, &randCount);
+		aux_ADD(w[j-7], t1, t1, randomness, &randCount);
+		aux_ADD(t1, s1, w[j], randomness, &randCount);
 
 	}
 
-	uint32_t a = hA[0];
-	uint32_t b = hA[1];
-	uint32_t c = hA[2];
-	uint32_t d = hA[3];
-	uint32_t e = hA[4];
-	uint32_t f = hA[5];
-	uint32_t g = hA[6];
-	uint32_t h = hA[7];
-	uint32_t temp1, temp2, temp3, maj;
+	uint32_t a[NUM_PARTIES];
+	uint32_t b[NUM_PARTIES];
+	uint32_t c[NUM_PARTIES];
+	uint32_t d[NUM_PARTIES];
+	uint32_t e[NUM_PARTIES];
+	uint32_t f[NUM_PARTIES];
+	uint32_t g[NUM_PARTIES];
+	uint32_t h[NUM_PARTIES];
+	for (int i = 0; i < NUM_PARTIES;i++)
+	{
+		a[i] = hA[0];
+		b[i] = hA[1];
+		c[i] = hA[2];
+		d[i] = hA[3];
+		e[i] = hA[4];
+		f[i] = hA[5];
+		g[i] = hA[6];
+		h[i] = hA[7];
+	}
+
+	uint32_t temp1[NUM_PARTIES], temp2[NUM_PARTIES], temp3[NUM_PARTIES], maj[NUM_PARTIES];
 
 	for (int i = 0; i < 64; i++) {
 		//s1 = RIGHTROTATE(e,6) ^ RIGHTROTATE(e,11) ^ RIGHTROTATE(e,25);
-		mpc_RIGHTROTATE(e, 6, &t0);
-		mpc_RIGHTROTATE(e, 11, &t1);
-		mpc_XOR(t0, t1, &t0);
+		mpc_RIGHTROTATE(e, 6, t0);
+		mpc_RIGHTROTATE(e, 11, t1);
+		mpc_XOR(t0, t1, t0);
 
-		mpc_RIGHTROTATE(e, 25, &t1);
-		mpc_XOR(t0, t1, &s1);
+		mpc_RIGHTROTATE(e, 25, t1);
+		mpc_XOR(t0, t1, s1);
 
 
 		//ch = (e & f) ^ ((~e) & g);
@@ -601,58 +660,59 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 
 		//t0 = h + s1
 
-		aux_ADD(h, s1, &t0, randomness, &randCount);
+		aux_ADD(h, s1, t0, randomness, &randCount);
 
 
-		aux_CH(e, f, g, &t1, randomness, &randCount);
+		aux_CH(e, f, g, t1, randomness, &randCount);
 
 		//t1 = t0 + t1 (h+s1+ch)
-		aux_ADD(t0, t1, &t1, randomness, &randCount);
+		aux_ADD(t0, t1, t1, randomness, &randCount);
 
-		temp3 = k[i];	
-		aux_ADD(t1, temp3, &t1, randomness, &randCount);
+		for (int j = 0; j < NUM_PARTIES; j++)
+			temp3[j] = k[i];	
+		aux_ADD(t1, temp3, t1, randomness, &randCount);
 
-		aux_ADD(t1, w[i], &temp1, randomness, &randCount);
+		aux_ADD(t1, w[i], temp1, randomness, &randCount);
 
 		//s0 = RIGHTROTATE(a,2) ^ RIGHTROTATE(a,13) ^ RIGHTROTATE(a,22);
-		mpc_RIGHTROTATE(a, 2, &t0);
-		mpc_RIGHTROTATE(a, 13, &t1);
-		mpc_XOR(t0, t1, &t0);
-		mpc_RIGHTROTATE(a, 22, &t1);
-		mpc_XOR(t0, t1, &s0);
+		mpc_RIGHTROTATE(a, 2, t0);
+		mpc_RIGHTROTATE(a, 13, t1);
+		mpc_XOR(t0, t1, t0);
+		mpc_RIGHTROTATE(a, 22, t1);
+		mpc_XOR(t0, t1, s0);
 
 
-		aux_MAJ(a, b, c, &maj, randomness, &randCount);
+		aux_MAJ(a, b, c, maj, randomness, &randCount);
 
 		//temp2 = s0+maj;
-		aux_ADD(s0, maj, &temp2, randomness, &randCount);
+		aux_ADD(s0, maj, temp2, randomness, &randCount);
 
-		h = g;
-		g = f;
-		f = e;
-
+		memcpy(h, g, sizeof(uint32_t) * NUM_PARTIES);
+		memcpy(g, f, sizeof(uint32_t) * NUM_PARTIES);
+		memcpy(f, e, sizeof(uint32_t) * NUM_PARTIES);
 		//e = d+temp1;
-		aux_ADD(d, temp1, &e, randomness, &randCount);
-		d = c;
-		c = b;
-		b = a;
+		aux_ADD(d, temp1, e, randomness, &randCount);
+		memcpy(d, c, sizeof(uint32_t) * NUM_PARTIES);
+		memcpy(c, b, sizeof(uint32_t) * NUM_PARTIES);
+		memcpy(b, a, sizeof(uint32_t) * NUM_PARTIES);
 		//a = temp1+temp2;
 
-		aux_ADD(temp1, temp2, &a, randomness, &randCount);
+		aux_ADD(temp1, temp2, a, randomness, &randCount);
 	}
-	uint32_t hHa[8];
+	uint32_t hHa[8][NUM_PARTIES];
 	for (int i = 0;i < 8;i++)
 	{
-			hHa[i] = hA[i];
+		for (int j = 0;j < NUM_PARTIES;j++)
+			hHa[i][j] = hA[i];
 	}
-	aux_ADD(hHa[0], a, &hHa[0], randomness, &randCount);
-	aux_ADD(hHa[1], b, &hHa[1], randomness, &randCount);
-	aux_ADD(hHa[2], c, &hHa[2], randomness, &randCount);
-	aux_ADD(hHa[3], d, &hHa[3], randomness, &randCount);
-	aux_ADD(hHa[4], e, &hHa[4], randomness, &randCount);
-	aux_ADD(hHa[5], f, &hHa[5], randomness, &randCount);
-	aux_ADD(hHa[6], g, &hHa[6], randomness, &randCount);
-	aux_ADD(hHa[7], h, &hHa[7], randomness, &randCount);
+	aux_ADD(hHa[0], a, hHa[0], randomness, &randCount);
+	aux_ADD(hHa[1], b, hHa[1], randomness, &randCount);
+	aux_ADD(hHa[2], c, hHa[2], randomness, &randCount);
+	aux_ADD(hHa[3], d, hHa[3], randomness, &randCount);
+	aux_ADD(hHa[4], e, hHa[4], randomness, &randCount);
+	aux_ADD(hHa[5], f, hHa[5], randomness, &randCount);
+	aux_ADD(hHa[6], g, hHa[6], randomness, &randCount);
+	aux_ADD(hHa[7], h, hHa[7], randomness, &randCount);
 
 
 	return 0;
