@@ -80,9 +80,10 @@ static const uint32_t k[64] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 		0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814,
 		0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2 };
 
-#define ySize 736
+//#define ySize 736
+#define ySize 1328 
 //#define rSize 2912 
-#define rSize 10000 // 2912*2 = 5824 
+#define rSize 10624 // 2912*2 = 5824 
 #define NUM_PARTIES 32 
 #define NUM_ROUNDS 2 
 #define SHA256_INPUTS 64
@@ -324,7 +325,7 @@ uint8_t getParityFromWordArray(uint32_t * array, uint32_t size, uint32_t bitNumb
 
 	for (int i=0;i<size;i++)
 	{
-		parity ^= getBit((uint8_t *)array,bitNumber);
+		parity ^= getBit((uint8_t *)&array[i],bitNumber);
 	}
 	return parity;
 }
@@ -500,6 +501,7 @@ int32_t aux_bit_AND(uint32_t mask_a, uint32_t mask_b, unsigned char randomness[N
 	uint32_t and_helper = tapesToWord(randomness,randCount);
 	setBit((uint8_t*)&and_helper,NUM_PARTIES-1,0);
 	uint8_t aux_bit = (mask_a & mask_b) ^ parity32(and_helper);
+//printf("aux bit: a %x & b %x ^ and_helper %x = aux %x\n",mask_a, mask_b, parity32(and_helper), aux_bit);
 	setBit(randomness[lastParty], *randCount-1,aux_bit);
 
 	return output_mask;
@@ -529,9 +531,8 @@ void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 
 void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 
-	uint32_t aANDb,cANDaXORb;
+	uint32_t aANDb,cANDaXORb,OR;
 	uint32_t carry[NUM_PARTIES] = {0};
-
 	uint8_t mask_a,mask_b;
 
 	for (int i = 0; i < 32;i++) 
@@ -544,19 +545,34 @@ void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 		mask_a ^= mask_b;	
 		mask_b = getParityFromWordArray(carry,NUM_PARTIES,i);  
 		cANDaXORb=aux_bit_AND(mask_a,mask_b,randomness,randCount);
-
 		aANDb |= cANDaXORb;
 		if (i < 31)
 		{
 			for (int j = (NUM_PARTIES-1); j >= 0; j--)
 			{
-				setBit((uint8_t*)&carry[j],i+1,aANDb);
+				setBit((uint8_t*)&carry[j],i+1,aANDb & 0x01);
 				aANDb >>= 1;
 			}
 		}
+	if (0)
+	{
+		mask_a = parity32(aANDb) ^ 0x01;
+		mask_b = parity32(cANDaXORb) ^ 0x01;
+		OR = aux_bit_AND(mask_a,mask_b,randomness,randCount);
+		if (i < 31)
+		{
+			for (int j = (NUM_PARTIES-1); j >= 0; j--)
+			{
+				setBit((uint8_t*)&carry[j],i+1,(OR & 0x01)^0x01);
+				OR >>= 1;
+			}
+		}
+	}
+
 	}
 	for (int i=0;i<NUM_PARTIES;i++)
 		z[i] = x[i]^y[i]^carry[i];
+	
 
 }
 
@@ -587,6 +603,7 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 	int randCount = 0;
 
 	uint32_t w[64][NUM_PARTIES];
+printf("starting computeAuxTape...................\n");
 
 	memset(w,0,sizeof(int32_t)*64*NUM_PARTIES);
 	for (int i = 0; i < NUM_PARTIES; i++) {
@@ -595,6 +612,7 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 							| (shares[i][j * 4 + 2] << 8) | shares[i][j * 4 + 3];
 		}
 	}
+printf("w[0][0] = %X\n",w[0][0]);
 
 	uint32_t s0[NUM_PARTIES], s1[NUM_PARTIES];
 	uint32_t t0[NUM_PARTIES], t1[NUM_PARTIES];
@@ -616,7 +634,6 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 		mpc_XOR(t0, t1, s1);
 
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
-
 		aux_ADD(w[j-16], s0, t1, randomness, &randCount);
 		aux_ADD(w[j-7], t1, t1, randomness, &randCount);
 		aux_ADD(t1, s1, w[j], randomness, &randCount);
@@ -713,8 +730,9 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 	aux_ADD(hHa[5], f, hHa[5], randomness, &randCount);
 	aux_ADD(hHa[6], g, hHa[6], randomness, &randCount);
 	aux_ADD(hHa[7], h, hHa[7], randomness, &randCount);
+printf("hHa[0][0] = %X\n",hHa[0][0]);
 
-
+printf("computeAuxTape: randCount %d\n",randCount);
 	return 0;
 
 
