@@ -531,6 +531,39 @@ void aux_AND(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 
 void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PARTIES], unsigned char randomness[NUM_PARTIES][rSize], int* randCount) {
 
+	uint32_t aANDb, prev_carry = 0;
+	uint32_t carry[NUM_PARTIES] = {0};
+	uint8_t mask_a, mask_b,c = 0;
+
+	// sum = x ^ y ^ c
+	// carry = ((x ^ c) & (y ^ c)) ^ c
+static int once = 1;
+	for (int i = 31; i >= 0; i--)
+	{
+		prev_carry = getBitFromWordArray(carry,NUM_PARTIES,i);
+if (!once)
+printf("carry [%d:%x], \n",i,prev_carry);
+		mask_a = parity32(getBitFromWordArray(x,NUM_PARTIES,i) ^ prev_carry);  
+		mask_b = parity32(getBitFromWordArray(y,NUM_PARTIES,i) ^ prev_carry);  
+
+		aANDb = aux_bit_AND(mask_a,mask_b,randomness,randCount);
+		aANDb ^= prev_carry;
+		if (i > 0)
+		{
+			for (int j = (NUM_PARTIES-1); j >= 0; j--)
+			{
+				setBit((uint8_t *)&carry[j],i-1,(aANDb & 0x01));
+				aANDb>>=1;
+			}
+		}
+	}
+	once=1;
+
+	for (int i=0;i<NUM_PARTIES;i++)
+		z[i] = x[i]^y[i]^carry[i];
+
+
+/*
 	uint32_t aANDb,cANDaXORb,OR;
 	uint32_t carry[NUM_PARTIES] = {0};
 	uint8_t mask_a,mask_b;
@@ -572,6 +605,7 @@ void aux_ADD(uint32_t x[NUM_PARTIES], uint32_t y[NUM_PARTIES], uint32_t z[NUM_PA
 	}
 	for (int i=0;i<NUM_PARTIES;i++)
 		z[i] = x[i]^y[i]^carry[i];
+*/
 	
 
 }
@@ -632,9 +666,12 @@ printf("w[0][0] = %X\n",w[0][0]);
 		mpc_XOR(t0, t1, t0);
 		mpc_RIGHTSHIFT(w[j-2], 10, t1);
 		mpc_XOR(t0, t1, s1);
-
+if (j==16)
+printf("s0[0] = %x\n",s0[0]);
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
 		aux_ADD(w[j-16], s0, t1, randomness, &randCount);
+if (j==16)
+printf("t1[0] = %x\n",t1[0]);
 		aux_ADD(w[j-7], t1, t1, randomness, &randCount);
 		aux_ADD(t1, s1, w[j], randomness, &randCount);
 
