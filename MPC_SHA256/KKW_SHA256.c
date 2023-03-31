@@ -125,8 +125,8 @@ void mpc_AND(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint32_t x[
 	{
 		aANDb = tapesToWord(randomness,randCount);
 		and_helper = tapesToWord(randomness,randCount);
-		a = getBit((uint8_t*)&x_state,i);
-		b = getBit((uint8_t*)&y_state,i);
+		a = getBit32(x_state,i);
+		b = getBit32(y_state,i);
 		mask_a = getBitFromWordArray(x,NUM_PARTIES,i);
 		mask_b = getBitFromWordArray(y,NUM_PARTIES,i);
 
@@ -134,10 +134,10 @@ void mpc_AND(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint32_t x[
 		s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
 		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 		{
-			setBit((uint8_t *)&z[j],i,aANDb & 0x01);
+			setBit32(&z[j],i,aANDb & 0x01);
 			aANDb >>=1;
 		}
-		setBit((uint8_t*)z_state,i,parity32(s_shares)^(a&b));
+		setBit32(z_state,i,parity32(s_shares)^(a&b));
 		// write s_shares to view									                 
 		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 		{
@@ -158,111 +158,39 @@ void mpc_ADD(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint32_t x[
 	uint32_t mask_a, mask_b, mask_c = 0;
 	uint32_t carry[NUM_PARTIES] = {0};
 	uint8_t a, b, c = 0;
-	uint32_t res1;
 	uint32_t s_shares;
+	uint32_t val;
 
-	static int once=1;
+	*z_state = 0;
 	for (int i=31; i>=0; i--)
 	{
-if (!once)
-	printf("carry [%d:%x]\n",i,mask_c);
-		aANDb = tapesToWord(randomness,randCount);
-		and_helper = tapesToWord(randomness,randCount);
-		a = getBit((uint8_t*)&x_state,i) ^ c;
-		b = getBit((uint8_t*)&y_state,i) ^ c;
-		setBit((uint8_t*)z_state,i,a^b^c);
-		mask_a = getBitFromWordArray(x,NUM_PARTIES,i) ^ mask_c;
-		mask_b = getBitFromWordArray(y,NUM_PARTIES,i) ^ mask_c;
-
-		s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
-		c = parity32(s_shares)^(a&b)^c;
-		mask_c = (aANDb)^mask_c;
-
-		res1 = mask_c;
-		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
+		a = getBit32(x_state,i) ^ c;
+		b = getBit32(y_state,i) ^ c;
+		setBit32(z_state,i,a^b^c);
+		if (i>0)
 		{
-			setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
-			if (i > 0)
-				setBit((uint8_t *)&carry[j],i-1,res1 & 0x01);
-			s_shares >>=1;
-			res1 >>=1;
+			mask_c = getBitFromWordArray(carry,NUM_PARTIES,i);
+			mask_a = getBitFromWordArray(x,NUM_PARTIES,i) ^ mask_c;
+			mask_b = getBitFromWordArray(y,NUM_PARTIES,i) ^ mask_c;
+
+			aANDb = tapesToWord(randomness,randCount);
+			and_helper = tapesToWord(randomness,randCount);
+			s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
+			c = parity32(s_shares)^(a&b)^c;
+			aANDb ^= mask_c;
+
+			for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
+			{
+				setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
+				s_shares >>=1;
+				setBit32(&carry[j],i-1,aANDb & 0x01);
+				aANDb >>=1;
+			}
 		}
 	}
 	*countY+= 1;
-	once = 1;
 	for (int i=0;i<NUM_PARTIES;i++)
 		z[i] = x[i]^y[i]^carry[i];
-/*
-	uint32_t aANDb, and_helper, cANDaXORb, OR;
-	uint32_t mask_a, mask_b, mask_c = 0;
-	uint32_t carry[NUM_PARTIES] = {0};
-	uint8_t a, b, c = 0;
-	uint8_t res1,res2,res3;
-	uint32_t s_shares;
-
-	for (int i=0;i < 32;i++)
-	{
-		aANDb = tapesToWord(randomness,randCount);
-		and_helper = tapesToWord(randomness,randCount);
-		a = getBit((uint8_t*)&x_state,i);
-		b = getBit((uint8_t*)&y_state,i);
-
-		mask_a = getBitFromWordArray(x,NUM_PARTIES,i);
-		mask_b = getBitFromWordArray(y,NUM_PARTIES,i);
-
-		s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
-		res1 = parity32(s_shares)^(a&b); 
-		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
-		{
-			setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
-			s_shares >>=1;
-		}
-
-		cANDaXORb = tapesToWord(randomness,randCount);
-		and_helper = tapesToWord(randomness,randCount);
-		mask_a ^= mask_b;
-		mask_c = getBitFromWordArray(carry,NUM_PARTIES,i);	
-		a ^= b;
-		s_shares = (extend(a) & mask_c) ^ (extend(c) & mask_a) ^ and_helper ^ cANDaXORb;
-		res2 = parity32(s_shares)^(a&c); 
-		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
-		{
-			setBit((uint8_t *)&views[j].y[*countY+1],i,s_shares & 0x01);
-			s_shares >>=1;
-		}
-		setBit((uint8_t *)z_state,i,a^c); // need to xor parity32()?
-		aANDb |= cANDaXORb;
-		c = res1 | res2;
-		if (i < 31)
-		{
-			for (int j = (NUM_PARTIES-1); j >= 0; j--)
-			{
-				setBit((uint8_t*)&carry[j],i+1,aANDb & 0x01);
-				aANDb >>= 1;
-			}
-		}
-
-	if (0)
-	{	
-		OR = tapesToWord(randomness,randCount);
-		and_helper = tapesToWord(randomness,randCount);
-		mask_a = ~aANDb;
-		mask_b = ~cANDaXORb;
-		res1 = 0x01 ^ res1;
-		res2 = 0x01 ^ res2;
-		s_shares = (extend(res1) & mask_b) ^ (extend(res2) & mask_a) ^ and_helper ^ OR;
-		res3 = parity32(s_shares)^(res1&res2);
-		c = 0x01 ^ res3;
-		for (int j = (NUM_PARTIES-1); j >= 0; j--)
-		{
-			setBit((uint8_t*)&carry[j],i+1,(OR & 0x01)^0x01);
-			OR >>= 1;
-		}
-	}
-
-	}
-	*countY+=2;
-*/
 
 }
 
@@ -312,14 +240,12 @@ static uint32_t consol(uint32_t array[NUM_PARTIES])
 int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH],unsigned char results[SHA256_DIGEST_LENGTH][NUM_PARTIES], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
 {
 
-printf("starting mpc_sha256=====================.\n");
 	if (numBytes > 55)
 	{	
 		printf("Input too long, aborting!");
 		return -1;
 	}
 
-printf("numbytes %d\n",numBytes);
 	int randCount=0;;
 
 	uint32_t w_state[64] = {0};
@@ -338,13 +264,10 @@ printf("numbytes %d\n",numBytes);
 	inputs[numBytes] = 0x80;
 	inputs[62] = (numBytes *8) >> 8;
 	inputs[63] = (numBytes * 8);
-
 	for (int j = 0; j < 16; j++) {
 		w_state[j] ^= (inputs[j * 4] << 24) | (inputs[j * 4 + 1] << 16)
 							| (inputs[j * 4 + 2] << 8) | inputs[j * 4 + 3];
 	}
-
-printf("w_state[0] = %x, consolidated = %x %x %x %x\n",w_state[0],w_state[0]^consol(w[0]),w_state[1]^consol(w[1]),w_state[2]^consol(w[2]),w_state[15]^consol(w[15]));
 
 //	memcpy(views[i].x, w[i], 64);
 
@@ -357,14 +280,12 @@ printf("w_state[0] = %x, consolidated = %x %x %x %x\n",w_state[0],w_state[0]^con
 		//s0[i] = RIGHTROTATE(w[i][j-15],7) ^ RIGHTROTATE(w[i][j-15],18) ^ (w[i][j-15] >> 3);
 		mpc_RIGHTROTATE(w[j-15], 7, t0);
 		t0_state = RIGHTROTATE(w_state[j-15],7);
-printf("loop[%d]: t0 [%x] ",j,t0_state^consol(t0));
 		mpc_RIGHTROTATE(w[j-15], 18, t1);
 		t1_state = RIGHTROTATE(w_state[j-15],18);
 
 		mpc_XOR(t0, t1, t0);
 		t0_state = t0_state^t1_state;
 
-printf(" --- t0 [%x] ",t0_state^consol(t0));
 		mpc_RIGHTSHIFT(w[j-15], 3, t1);
 		t1_state = w_state[j-15] >> 3;
 
@@ -374,15 +295,12 @@ printf(" --- t0 [%x] ",t0_state^consol(t0));
 		//s1[i] = RIGHTROTATE(w[i][j-2],17) ^ RIGHTROTATE(w[i][j-2],19) ^ (w[i][j-2] >> 10);
 		mpc_RIGHTROTATE(w[j-2], 17, t0);
 		t0_state = RIGHTROTATE(w_state[j-2],17);
-printf(" rot t0 [%x] ",t0_state^consol(t0));
 
 		mpc_RIGHTROTATE(w[j-2], 19, t1);
 		t1_state = RIGHTROTATE(w_state[j-2],19);
-printf(" <<< w[%d] %x t1 [%x] >> ",j-2,w_state[j-2]^consol(w[j-2]),t1_state^consol(t1));
 
 		mpc_XOR(t0, t1, t0);
 		t0_state = t0_state^t1_state;
-printf(" --- t0 [%x]\n ",t0_state^consol(t0));
 
 		mpc_RIGHTSHIFT(w[j-2], 10, t1);
 		t1_state = w_state[j-2] >> 10;
@@ -391,14 +309,10 @@ printf(" --- t0 [%x]\n ",t0_state^consol(t0));
 		s1_state = t0_state^t1_state;
 		//w[i][j] = w[i][j-16]+s0[i]+w[i][j-7]+s1[i];
 		mpc_ADD(w_state[j-16],s0_state,&t1_state,w[j-16], s0, t1, randomness, &randCount, views, countY);
-printf("loop[%d]:w %x + s0 %x = ",j,w_state[j-16]^consol(w[j-16]),s0_state^consol(s0));
-printf(",t1 consolidated = %x, t0 %x\n",t1_state^consol(t1),t0_state^consol(t0));
 		mpc_ADD(w_state[j-7],t1_state,&t1_state, w[j-7], t1, t1, randomness, &randCount, views, countY);
 		mpc_ADD(t1_state, s1_state, &(w_state[j]), t1, s1, w[j], randomness, &randCount, views, countY);
-printf("loop[%d]:t1 %x + s1 %x = w[%d] %x\n ",j,t1_state^consol(t1),s1_state^consol(s1),j,w_state[j]^consol(w[j]));
 
 	}
-printf("w_state[16] = %x, consolidated = %x\n",w_state[16],w_state[16]^consol(w[16]));
 	uint32_t a[NUM_PARTIES];
 	uint32_t b[NUM_PARTIES];
 	uint32_t c[NUM_PARTIES];
@@ -523,7 +437,6 @@ printf("w_state[16] = %x, consolidated = %x\n",w_state[16],w_state[16]^consol(w[
 	mpc_ADD(hHa_state[6], g_state, &hHa_state[6], hHa[6], g, hHa[6], randomness, &randCount, views, countY);
 	mpc_ADD(hHa_state[7], h_state, &hHa_state[7], hHa[7], h, hHa[7], randomness, &randCount, views, countY);
 
-printf("hHa[0][0] = %x\n",hHa[0][0]);
 	for (int i = 0; i < 8; i++) {
 		mpc_RIGHTSHIFT(hHa[i], 24, t0);
 		t0_state = hHa_state[i] >> 24;
