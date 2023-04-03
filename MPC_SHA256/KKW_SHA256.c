@@ -54,37 +54,6 @@ int totalSha = 0;
 int totalSS = 0;
 int totalHash = 0;
 
-void Compute_RAND(unsigned char * output, int size, unsigned char * seed, int seedLen)
-{
-	unsigned char hash[SHA256_DIGEST_LENGTH];
-	char * tempptr = output;
-
-	SHA256_CTX ctx;
-	SHA256_Init(&ctx);
-	SHA256_Update(&ctx, &seedLen, sizeof(int));
-	SHA256_Update(&ctx, seed, seedLen);
-	SHA256_Update(&ctx, &size, sizeof(int));
-        SHA256_Final(hash, &ctx);
-	while (size > 0)
-	{
-		SHA256_Init(&ctx);
-		SHA256_Update(&ctx, &seedLen, sizeof(int));
-		SHA256_Update(&ctx, seed, seedLen);
-		SHA256_Update(&ctx, hash, sizeof(hash));
-        	SHA256_Final(hash, &ctx);
-		if (size >= SHA256_DIGEST_LENGTH)
-		{
-			memcpy(tempptr,hash,SHA256_DIGEST_LENGTH);
-			tempptr += SHA256_DIGEST_LENGTH;
-		}
-		else
-			memcpy(tempptr,hash,size);
-		size -= SHA256_DIGEST_LENGTH;
-	}
-}
-
-
-
 uint32_t rand32() {
 	uint32_t x;
 	x = rand() & 0xff;
@@ -237,7 +206,7 @@ static uint32_t consol(uint32_t array[NUM_PARTIES])
 
 
 
-int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH],unsigned char results[SHA256_DIGEST_LENGTH][NUM_PARTIES], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
+int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
 {
 
 	if (numBytes > 55)
@@ -270,6 +239,8 @@ int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH],unsigned char r
 	}
 
 //	memcpy(views[i].x, w[i], 64);
+
+//	printf("w_state[0] = %x\n",w_state[0]); // just to check that values are scampled
 
 	uint32_t s0[NUM_PARTIES], s1[NUM_PARTIES];
 	uint32_t t0[NUM_PARTIES], t1[NUM_PARTIES];
@@ -442,26 +413,26 @@ int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH],unsigned char r
 		t0_state = hHa_state[i] >> 24;
 
 		for (int j = 0;j< NUM_PARTIES;j++)
-			results[i * 4][j] = t0[j];
+			views[j].results[i * 4] = t0[j];
 		masked_result[i*4] = t0_state;
 
 		mpc_RIGHTSHIFT(hHa[i], 16, t0);
 		t0_state = hHa_state[i] >> 16;
 		for (int j = 0;j< NUM_PARTIES;j++)
-			results[i * 4 + 1][j] = t0[j];
+			views[j].results[i * 4 + 1] = t0[j];
 		masked_result[i*4+1] = t0_state;
 
 		mpc_RIGHTSHIFT(hHa[i], 8, t0);
 		t0_state = hHa_state[i] >> 8;
 		for (int j = 0;j< NUM_PARTIES;j++)
-			results[i * 4 + 2][j] = t0[j];
+			views[j].results[i * 4 + 2] = t0[j];
 		masked_result[i*4+2] = t0_state;
 
 		for (int j = 0;j< NUM_PARTIES;j++)
-			results[i * 4 + 3][j] = hHa[i][j];
+			views[j].results[i * 4 + 3] = hHa[i][j];
 		masked_result[i*4+3] = hHa_state[i];
 	}
-	printf("mpc_sha256: randCount %d\n",randCount);
+//	printf("mpc_sha256: randCount %d\n",randCount);
 
 	return 0;
 }
@@ -498,23 +469,8 @@ int secretShare(unsigned char* input, int numBytes, unsigned char output[3][numB
 
 
 
-z prove(int e, unsigned char keys[NUM_PARTIES][16], View views[NUM_PARTIES]) {
-	z z;
-	memcpy(z.ke, keys[e], 16);
-	memcpy(z.ke1, keys[(e + 1) % 3], 16);
-	z.ve = views[e];
-	z.ve1 = views[(e + 1) % 3];
-/*
-	memcpy(z.re, rs[e],4);
-	memcpy(z.re1, rs[(e + 1) % 3],4);
-*/
-
-	return z;
-}
-
 int main(int argc, char * argv[]) 
 {
-	printf("hello world\n");
 //	setbuf(stdout, NULL);
 	srand((unsigned) time(NULL));
 	init_EVP();
@@ -535,12 +491,18 @@ int main(int argc, char * argv[])
 	for(int j = 0; j<i; j++) {
 		input[j] = userInput[j];
 	}
-	unsigned char rs[NUM_ROUNDS][NUM_PARTIES][4];
+	unsigned char masterkeys[NUM_ROUNDS][16];
 	unsigned char keys[NUM_ROUNDS][NUM_PARTIES][16];
+	unsigned char rs[NUM_ROUNDS][NUM_PARTIES][4];
 	a as[NUM_ROUNDS];
 
         //Generating keys
-	Compute_RAND((unsigned char *)keys, NUM_ROUNDS*NUM_PARTIES*16,input,strlen(userInput));  
+	Compute_RAND((unsigned char *)masterkeys, NUM_ROUNDS*16,input,strlen(userInput));  
+	for (int j = 0; j < NUM_ROUNDS; j++)
+	{
+		Compute_RAND((unsigned char *)keys[j], NUM_PARTIES*16,masterkeys[j],16);  
+		RAND_bytes((unsigned char *)rs[j],NUM_PARTIES*16);
+	}
         //Sharing secrets
 	unsigned char shares[NUM_ROUNDS][NUM_PARTIES][SHA256_INPUTS];
 	for (int j=0;j<NUM_ROUNDS;j++)
@@ -560,22 +522,49 @@ int main(int argc, char * argv[])
 	//compute AUX Tape
 	unsigned char com[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
 	unsigned char commitedH[SHA256_DIGEST_LENGTH];
-	SHA256_CTX ctx;
+	SHA256_CTX ctx,hctx,H1ctx,H2ctx;
+	unsigned char temphash1[SHA256_DIGEST_LENGTH];
+	unsigned char temphash2[SHA256_DIGEST_LENGTH];
+	unsigned char temphash3[SHA256_DIGEST_LENGTH];
+	unsigned char auxBits[rSize/8+1];
+
+	SHA256_Init(&H1ctx);
 	for (int k = 0; k<NUM_ROUNDS;k++)
 	{
-		
 		computeAuxTape(randomness[k],shares[k]);
-		SHA256_Init(&ctx);
-		SHA256_Update(&ctx, randomness[k], rSize);
-		SHA256_Update(&ctx, shares[k], 16);
-		SHA256_Final(com[k],&ctx);
+		SHA256_Init(&hctx);
+		for (int j = 0; j < NUM_PARTIES; j++)
+		{
+			SHA256_Init(&ctx);
+			SHA256_Update(&ctx, keys[k][j], 16);
+			if (j == (NUM_PARTIES-1))
+			{
+				size_t pos = 0;
+				memset(auxBits,0,rSize/8+1);
+				// need to include aux tape
+				for (int i = 1; i < rSize; i+=2)
+				{
+					uint8_t auxBit = getBit(randomness[k][j],i);
+					setBit(auxBits,pos,auxBit);
+					pos++;
+				}
+				SHA256_Update(&ctx, auxBits, rSize/8+1);
+			}
+			SHA256_Update(&ctx, rs[k][j], 4);
+			SHA256_Final(temphash1,&ctx);
+			SHA256_Update(&hctx, temphash1, SHA256_DIGEST_LENGTH);
+		}
+		SHA256_Final(temphash1,&hctx);
+		SHA256_Update(&H1ctx, temphash1, SHA256_DIGEST_LENGTH);
 	}
+	SHA256_Final(temphash1,&H1ctx);
 
 
 	//Running MPC-SHA2 online
-	unsigned char result[NUM_ROUNDS][SHA256_DIGEST_LENGTH][NUM_PARTIES];
 	unsigned char masked_result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
 	View localViews[NUM_ROUNDS][NUM_PARTIES];
+	unsigned char H2[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
+	SHA256_Init(&H2ctx);
 //	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		int countY = 0;
@@ -591,76 +580,86 @@ int main(int argc, char * argv[])
 		printf("\n");
 		}
 	*/	
-		mpc_sha256(masked_result[k],result[k],shares[k],input, i, randomness[k], localViews[k],&countY);
-		printf("countY %d result of hash:",countY);
-		for (int j=0;j<SHA256_DIGEST_LENGTH;j++)
+		mpc_sha256(masked_result[k],shares[k],input, i, randomness[k], localViews[k],&countY);
+		
+		SHA256_Init(&hctx);
+		SHA256_Update(&hctx,masked_result[k],SHA256_DIGEST_LENGTH);
+		for (int j=0;j<NUM_PARTIES;j++)
+			SHA256_Update(&hctx, localViews[k][j].y,ySize*4);
+		SHA256_Update(&hctx, rs[k], NUM_PARTIES*4);
+		SHA256_Final(H2[k],&hctx);
+
+		SHA256_Update(&H2ctx, H2[k], SHA256_DIGEST_LENGTH);
+		if (k == 0)
 		{
-			unsigned char temp = masked_result[k][j];
-			for (int i=0;i<NUM_PARTIES;i++)
+			printf("countY %d result of hash:",countY);
+			for (int j=0;j<SHA256_DIGEST_LENGTH;j++)
 			{
-				temp ^= result[k][j][i];
+				unsigned char temp = masked_result[k][j];
+				for (int i=0;i<NUM_PARTIES;i++)
+				{
+					temp ^= localViews[k][i].results[j];
+				}
+				printf("%02X",temp);
 			}
-			printf("%02X",temp);
+			printf("\n");
 		}
-		printf("\n");
 	}
+	SHA256_Final(temphash2,&H2ctx);
 
-/*
+	SHA256_Init(&hctx);
+	SHA256_Update(&hctx, temphash1, SHA256_DIGEST_LENGTH);
+	SHA256_Update(&hctx, temphash2, SHA256_DIGEST_LENGTH);
+	SHA256_Final(temphash3,&hctx);
+
 	//Committing
-//	#pragma omp parallel for
-	for(int k=0; k<NUM_ROUNDS; k++) {
-		unsigned char hash1[SHA256_DIGEST_LENGTH];
-		H(keys[k][0], localViews[k][0], rs[k][0], hash1);
-		memcpy(as[k].h[0], &hash1, 32);
-		H(keys[k][1], localViews[k][1], rs[k][1], hash1);
-		memcpy(as[k].h[1], &hash1, 32);
-		H(keys[k][2], localViews[k][2], rs[k][2], hash1);
-		memcpy(as[k].h[2], hash1, 32);
-	}
-				
-
-	//Generating E
+	z kkwProof;
 	int es[NUM_ROUNDS];
-	uint32_t finalHash[8];
-	for (int j = 0; j < 8; j++) {
-		finalHash[j] = as[0].yp[0][j]^as[0].yp[1][j]^as[0].yp[2][j];
+	memcpy(kkwProof.H,temphash3,SHA256_DIGEST_LENGTH);
+	H3(temphash3, NUM_ONLINE, es);
+
+	int masterkeycount = 0;
+	int keyscount = 0;
+
+	for (int i = 0; i < NUM_ROUNDS;i++)
+	{
+		if (!es[i])
+		{
+			memcpy(kkwProof.masterkeys[masterkeycount],masterkeys[i],16);
+			memcpy(kkwProof.H2[masterkeycount++],H2[i],SHA256_DIGEST_LENGTH);
+		}
+		else
+		{
+			int keys1count = 0;
+			for (int j = 0; j < NUM_PARTIES; j++)
+			{
+				if ((j+1) != es[i])
+				{
+					memcpy(kkwProof.keys[keyscount][keys1count],keys[i][j],16);
+					memcpy(kkwProof.rs[keyscount][keys1count++],rs[i][j],4);
+					memcpy(&kkwProof.views[keyscount++],localViews[i],sizeof(View));
+				}
+			}
+		}
 	}
-	H3(finalHash, as, NUM_ROUNDS, es);
-
-
-	//Packing Z
-	z* zs = malloc(sizeof(z)*NUM_ROUNDS);
-
-//	#pragma omp parallel for
-	for(int i = 0; i<NUM_ROUNDS; i++) {
-		zs[i] = prove(es[i],keys[i],localViews[i]);
-	}
-	
-	
+		
 	//Writing to file
 	FILE *file;
+	char outputFile[100];
 
-	char outputFile[3*sizeof(int) + 8];
-	sprintf(outputFile, "out%i.bin", NUM_ROUNDS);
+	sprintf(outputFile, "out%i-%i.bin", NUM_ROUNDS,NUM_ONLINE);
 	file = fopen(outputFile, "wb");
 	if (!file) {
 		printf("Unable to open file!");
 		return 1;
 	}
-	fwrite(as, sizeof(a), NUM_ROUNDS, file);
-	fwrite(zs, sizeof(z), NUM_ROUNDS, file);
+	fwrite(&kkwProof, sizeof(z), 1, file);
 
 	fclose(file);
 
-	free(zs);
-
-
-	int sumOfParts = 0;
-
-	printf("Proof output to file %s", outputFile);
+	printf("Proof output to file %s\n", outputFile);
 
 	openmp_thread_cleanup();
 	cleanup_EVP();
-*/
 	return EXIT_SUCCESS;
 }

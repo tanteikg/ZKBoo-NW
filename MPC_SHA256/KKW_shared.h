@@ -83,13 +83,14 @@ static const uint32_t k[64] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 //#define ySize 736
 #define ySize 728 
 //#define rSize 2912 
-#define rSize 45392 // 2912*2 = 5824 
+#define rSize (45392/8) // 2912*2 = 5824 
 #define NUM_PARTIES 32 
-#define NUM_ROUNDS 2 
+#define NUM_ROUNDS 28 
 #define SHA256_INPUTS 64
+#define NUM_ONLINE 7  // out of NUM_ROUNDS
 
 typedef struct {
-	unsigned char x[64];
+	unsigned char results[SHA256_DIGEST_LENGTH];
 	uint32_t y[ySize];
 } View;
 
@@ -99,12 +100,12 @@ typedef struct {
 } a;
 
 typedef struct {
-	unsigned char ke[16];
-	unsigned char ke1[16];
-	View ve;
-	View ve1;
-	unsigned char re[4];
-	unsigned char re1[4];
+	unsigned char H[SHA256_DIGEST_LENGTH];
+	unsigned char masterkeys[NUM_ROUNDS-NUM_ONLINE][16];
+	unsigned char H2[NUM_ROUNDS-NUM_ONLINE][SHA256_DIGEST_LENGTH];
+	unsigned char keys[NUM_ONLINE][NUM_PARTIES-1][16];
+	unsigned char rs[NUM_ONLINE][NUM_PARTIES-1][4];
+	View views[NUM_ONLINE];
 } z;
 
 #define RIGHTROTATE(x,n) (((x) >> (n)) | ((x) << (32-(n))))
@@ -116,6 +117,40 @@ typedef struct {
 
 #define MAX_DIGEST_SIZE 64
 #define SHA256_DIGEST_SIZE 32
+
+void Compute_RAND(unsigned char * output, int size, unsigned char * seed, int seedLen)
+{
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	char * namestr = "pQCee AStablish";
+	char * tempptr = output;
+	uint32_t count = 1;
+
+	SHA256_CTX ctx;
+	SHA256_Init(&ctx);
+	SHA256_Update(&ctx, namestr, strlen(namestr));
+	SHA256_Update(&ctx, &seedLen, sizeof(int));
+	SHA256_Update(&ctx, seed, seedLen);
+	SHA256_Update(&ctx, &size, sizeof(int));
+	SHA256_Final(hash, &ctx);
+	while (size > 0)
+	{
+		SHA256_Init(&ctx);
+		SHA256_Update(&ctx, &count, sizeof(int));
+		SHA256_Update(&ctx, &seedLen, sizeof(int));
+		SHA256_Update(&ctx, seed, seedLen);
+		SHA256_Update(&ctx, hash, sizeof(hash));
+		SHA256_Final(hash, &ctx);
+		if (size >= SHA256_DIGEST_LENGTH)
+		{
+			memcpy(tempptr,hash,SHA256_DIGEST_LENGTH);
+			tempptr += SHA256_DIGEST_LENGTH;
+		}
+		else
+			memcpy(tempptr,hash,size);
+		size -= SHA256_DIGEST_LENGTH;
+		count++;
+	}
+}
 
 void handleErrors(void)
 {
@@ -190,46 +225,40 @@ void H(unsigned char k[16], View v, unsigned char r[4], unsigned char hash[SHA25
 }
 
 
-void H3(uint32_t y[8], a* as, int s, int* es) {
+void H3(unsigned char finalhash[SHA256_DIGEST_LENGTH], int s, int es[NUM_ROUNDS]) {
 
 	unsigned char hash[SHA256_DIGEST_LENGTH];
+	int i = NUM_ROUNDS;
 	SHA256_CTX ctx;
 	SHA256_Init(&ctx);
-	SHA256_Update(&ctx, y, 32);
-	SHA256_Update(&ctx, as, sizeof(a)*s);
+	SHA256_Update(&ctx, finalhash, SHA256_DIGEST_LENGTH);
+	SHA256_Update(&ctx, &i, sizeof(int));
+	SHA256_Update(&ctx, &s, sizeof(int));
 	SHA256_Final(hash, &ctx);
 
 	//Pick bits from hash
-	int i = 0;
+	memset(es,0,sizeof(int)*NUM_ROUNDS);
 	int bitTracker = 0;
-	while(i < s) {
-		if(bitTracker >= SHA256_DIGEST_LENGTH*8) { //Generate new hash as we have run out of bits in the previous hash
+	while(s>0) {
+		if(bitTracker >= 32) { //Generate new hash as we have run out of bits in the previous hash
 			SHA256_Init(&ctx);
 			SHA256_Update(&ctx, hash, sizeof(hash));
+			SHA256_Update(&ctx, &s, sizeof(int));
 			SHA256_Final(hash, &ctx);
 			bitTracker = 0;
 		}
-
-		int b1 = GETBIT(hash[bitTracker/8], bitTracker % 8);
-		int b2 = GETBIT(hash[(bitTracker+1)/8], (bitTracker+1) % 8);
-		if(b1 == 0) {
-			if(b2 == 0) {
-				es[i] = 0;
-				bitTracker += 2;
-				i++;
-			} else {
-				es[i] = 1;
-				bitTracker += 2;
-				i++;
-			}
-		} else {
-			if(b2 == 0) {
-				es[i] = 2;
-				bitTracker += 2;
-				i++;
-			} else {
-				bitTracker += 2;
-			}
+		memcpy((unsigned char *)&i,&hash[bitTracker],4);
+		bitTracker+=4;
+		i %= NUM_ROUNDS;
+		if (bitTracker >= 32)
+			continue;
+		if (es[i] == 0)
+		{
+			memcpy((unsigned char *)&i,&hash[bitTracker],4);
+			bitTracker+=4;
+			i %= NUM_PARTIES;
+			es[i] = i+1;
+			s--;
 		}
 	}
 
@@ -728,13 +757,17 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 	aux_ADD(hHa[6], g, hHa[6], randomness, &randCount);
 	aux_ADD(hHa[7], h, hHa[7], randomness, &randCount);
 
-printf("computeAuxTape: randCount %d\n",randCount);
+//	printf("computeAuxTape: randCount %d\n",randCount);
 	return 0;
 
 
 }
 
+int verify(a a, int e, z z) {
+	return -1;
+}
 
+/*
 int verify(a a, int e, z z) {
 	unsigned char* hash = malloc(SHA256_DIGEST_LENGTH);
 	H(z.ke, z.ve, z.re, hash);
@@ -1009,6 +1042,6 @@ int verify(a a, int e, z z) {
 	return 0;
 }
 
-
+*/
 
 #endif /* SHARED_H_ */
