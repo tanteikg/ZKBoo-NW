@@ -95,16 +95,13 @@ typedef struct {
 } View;
 
 typedef struct {
-	uint32_t yp[NUM_PARTIES][8];
-	unsigned char h[NUM_PARTIES][32];
-} a;
-
-typedef struct {
+	unsigned char rsseed[16];
 	unsigned char H[SHA256_DIGEST_LENGTH];
 	unsigned char masterkeys[NUM_ROUNDS-NUM_ONLINE][16];
 	unsigned char H2[NUM_ROUNDS-NUM_ONLINE][SHA256_DIGEST_LENGTH];
 	unsigned char keys[NUM_ONLINE][NUM_PARTIES-1][16];
-	unsigned char rs[NUM_ONLINE][NUM_PARTIES-1][4];
+	unsigned char com[NUM_ONLINE][SHA256_DIGEST_LENGTH];
+	unsigned char auxBits[NUM_ONLINE][rSize/8+1];
 	View views[NUM_ONLINE];
 } z;
 
@@ -761,10 +758,6 @@ int computeAuxTape(unsigned char randomness[NUM_PARTIES][rSize],unsigned char sh
 	return 0;
 
 
-}
-
-int verify(a a, int e, z z) {
-	return -1;
 }
 
 /*

@@ -493,21 +493,24 @@ int main(int argc, char * argv[])
 	}
 	unsigned char masterkeys[NUM_ROUNDS][16];
 	unsigned char keys[NUM_ROUNDS][NUM_PARTIES][16];
+	unsigned char rsseed[20];
 	unsigned char rs[NUM_ROUNDS][NUM_PARTIES][4];
-	a as[NUM_ROUNDS];
 
         //Generating keys
 	Compute_RAND((unsigned char *)masterkeys, NUM_ROUNDS*16,input,strlen(userInput));  
+	RAND_bytes((unsigned char *)&rsseed[4],16);
 	for (int j = 0; j < NUM_ROUNDS; j++)
 	{
 		Compute_RAND((unsigned char *)keys[j], NUM_PARTIES*16,masterkeys[j],16);  
-		RAND_bytes((unsigned char *)rs[j],NUM_PARTIES*16);
+		memcpy((unsigned char *)rsseed,&j,sizeof(int));
+		Compute_RAND((unsigned char *)rs[j],NUM_PARTIES*4,rsseed,20);
 	}
         //Sharing secrets
 	unsigned char shares[NUM_ROUNDS][NUM_PARTIES][SHA256_INPUTS];
 	for (int j=0;j<NUM_ROUNDS;j++)
 	{
-		Compute_RAND((unsigned char *)&(shares[j]),NUM_PARTIES*SHA256_INPUTS,(unsigned char *)keys[j],NUM_PARTIES*16);
+		for (int k=0;k<NUM_PARTIES;k++)
+			Compute_RAND((unsigned char *)&(shares[j][k]),SHA256_INPUTS,(unsigned char *)keys[j][k],16);
 	}
 
         //Generating randomness
@@ -520,13 +523,11 @@ int main(int argc, char * argv[])
 		}
 	}
 	//compute AUX Tape
-	unsigned char com[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
-	unsigned char commitedH[SHA256_DIGEST_LENGTH];
 	SHA256_CTX ctx,hctx,H1ctx,H2ctx;
 	unsigned char temphash1[SHA256_DIGEST_LENGTH];
 	unsigned char temphash2[SHA256_DIGEST_LENGTH];
 	unsigned char temphash3[SHA256_DIGEST_LENGTH];
-	unsigned char auxBits[rSize/8+1];
+	unsigned char auxBits[NUM_ROUNDS][rSize/8+1];
 
 	SHA256_Init(&H1ctx);
 	for (int k = 0; k<NUM_ROUNDS;k++)
@@ -545,10 +546,10 @@ int main(int argc, char * argv[])
 				for (int i = 1; i < rSize; i+=2)
 				{
 					uint8_t auxBit = getBit(randomness[k][j],i);
-					setBit(auxBits,pos,auxBit);
+					setBit(auxBits[k],pos,auxBit);
 					pos++;
 				}
-				SHA256_Update(&ctx, auxBits, rSize/8+1);
+				SHA256_Update(&ctx, auxBits[k], rSize/8+1);
 			}
 			SHA256_Update(&ctx, rs[k][j], 4);
 			SHA256_Final(temphash1,&ctx);
@@ -616,10 +617,11 @@ int main(int argc, char * argv[])
 	z kkwProof;
 	int es[NUM_ROUNDS];
 	memcpy(kkwProof.H,temphash3,SHA256_DIGEST_LENGTH);
+	memcpy(kkwProof.rsseed,&rsseed[4],16);
 	H3(temphash3, NUM_ONLINE, es);
 
 	int masterkeycount = 0;
-	int keyscount = 0;
+	int onlinecount = 0;
 
 	for (int i = 0; i < NUM_ROUNDS;i++)
 	{
@@ -630,16 +632,28 @@ int main(int argc, char * argv[])
 		}
 		else
 		{
-			int keys1count = 0;
+			memcpy(kkwProof.auxBits[onlinecount],auxBits[i],rSize/8+1);
+			int partycount = 0;
 			for (int j = 0; j < NUM_PARTIES; j++)
 			{
 				if ((j+1) != es[i])
 				{
-					memcpy(kkwProof.keys[keyscount][keys1count],keys[i][j],16);
-					memcpy(kkwProof.rs[keyscount][keys1count++],rs[i][j],4);
-					memcpy(&kkwProof.views[keyscount++],localViews[i],sizeof(View));
+					memcpy(kkwProof.keys[onlinecount][partycount++],keys[i][j],16);
+					memcpy(&kkwProof.views[onlinecount],localViews[i],sizeof(View));
+				}
+				else
+				{
+					SHA256_Init(&ctx);
+					SHA256_Update(&hctx,keys[i][j],SHA256_DIGEST_LENGTH);
+					if (j == (NUM_PARTIES-1))
+					{
+						SHA256_Update(&ctx, auxBits[i], rSize/8+1);
+					}
+					SHA256_Update(&ctx, rs[i][j], 4);
+					SHA256_Final(kkwProof.com[onlinecount],&ctx);
 				}
 			}
+			onlinecount++;
 		}
 	}
 		
