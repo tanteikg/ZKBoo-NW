@@ -45,15 +45,6 @@
 #include "KKW_shared.h"
 
 
-void printbits(uint32_t n) {
-	if (n) {
-		printbits(n >> 1);
-		printf("%d", n & 1);
-	}
-
-}
-
-
 int isOnline(int es[NUM_ROUNDS], int round)
 {
 	return es[round];
@@ -133,13 +124,14 @@ int main(int argc, char * argv[]) {
 		}
 	}
 	
-	unsigned char H2[NUM_ROUNDS][NUM_ONLINE][SHA256_DIGEST_LENGTH];
-
 	SHA256_CTX ctx,hctx,H1ctx,H2ctx;
 	unsigned char H1hash[SHA256_DIGEST_LENGTH];
+	unsigned char H2hash[SHA256_DIGEST_LENGTH];
 	unsigned char temphash1[SHA256_DIGEST_LENGTH];
 	unsigned char temphash2[SHA256_DIGEST_LENGTH];
+	unsigned char masked_result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
 	unsigned char auxBits[rSize/8+1];
+	View localViews[NUM_ONLINE][NUM_PARTIES];
 
 	roundctr = 0;
 
@@ -203,10 +195,59 @@ int main(int argc, char * argv[]) {
 	}
 	SHA256_Final(H1hash,&H1ctx);
 
+	SHA256_Init(&H2ctx);
+	roundctr = 0;
+	int onlinectr = 0;
+	for (int k=0; k < NUM_ROUNDS; k++)
+	{
+		int countY = 0;
+		if (!isOnline(es,k))
+		{
+			SHA256_Update(&H2ctx,kkwProof.H2[roundctr++],SHA256_DIGEST_LENGTH);
+		}
+		else
+		{
+			SHA256_Init(&hctx);
+			SHA256_Update(&hctx,kkwProof.maskedInput[onlinectr],SHA256_INPUTS);
+			mpc_sha256(masked_result[onlinectr],kkwProof.maskedInput[onlinectr],shares[k],NULL,es[k]-1,randomness[k],localViews[onlinectr],&countY);
+			
+			SHA256_Update(&hctx,masked_result[onlinectr],SHA256_DIGEST_LENGTH);
+			memcpy(&localViews[onlinectr][(es[k]-1)],&kkwProof.views[onlinectr],sizeof(View));
+			SHA256_Update(&hctx,rs[k],NUM_PARTIES*4);
+			SHA256_Final(temphash1,&hctx);
+			SHA256_Update(&H2ctx,temphash1,SHA256_DIGEST_LENGTH);
+
+			onlinectr++;
+		}
+	}
+	SHA256_Final(H2hash,&H2ctx);
+
+	SHA256_Init(&hctx);
+	SHA256_Update(&hctx,H1hash,SHA256_DIGEST_LENGTH);
+	SHA256_Update(&hctx,H2hash,SHA256_DIGEST_LENGTH);
+	SHA256_Final(temphash1,&hctx);
+
+	if (memcpy(temphash1,kkwProof.H,SHA256_DIGEST_LENGTH))
+	{
+		printf("Error: Hash does not match\n");
+		return -1;
+	}		
+	else
+	{
+		printf("Received pre-image proof for hash : ");
+		for (int j = 0; j<SHA256_DIGEST_LENGTH;j++)
+		{
+			unsigned char temp = masked_result[0][j];
+			for (int i=0;i<NUM_PARTIES;i++)
+			{
+				temp ^= localViews[0][i].results[j];
+			}
+			printf("%02X",temp);
+		}
+		printf("\n");		
+	}
 	
 	
-
-
 	openmp_thread_cleanup();
 	cleanup_EVP();
 	return EXIT_SUCCESS;
