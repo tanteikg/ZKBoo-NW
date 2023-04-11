@@ -81,6 +81,7 @@ int main(int argc, char * argv[]) {
 */
 
 	int es[NUM_ROUNDS];
+	memset(es,0,NUM_ROUNDS*sizeof(int));
 	H3(kkwProof.H, NUM_ONLINE, es);
 
 	unsigned char keys[NUM_ROUNDS][NUM_PARTIES][16];
@@ -88,9 +89,13 @@ int main(int argc, char * argv[]) {
 	unsigned char rs[NUM_ROUNDS][NUM_PARTIES][4];
 	unsigned char shares[NUM_ROUNDS][NUM_PARTIES][SHA256_INPUTS];
 	unsigned char randomness[NUM_ROUNDS][NUM_PARTIES][rSize];
+	memset(randomness,0,NUM_ROUNDS*NUM_PARTIES*rSize);
 
+	memset(shares,0,NUM_ROUNDS*NUM_PARTIES*SHA256_INPUTS);
+	memcpy(&rsseed[4],kkwProof.rsseed,16);
 	int roundctr = 0;
 	int partyctr = 0;
+	int onlinectr = 0;
 	for (int j = 0; j < NUM_ROUNDS; j++)
 	{
 		memcpy((unsigned char *)rsseed,&j,sizeof(int));
@@ -98,11 +103,13 @@ int main(int argc, char * argv[]) {
 		if (!isOnline(es,j))
 		{
 			Compute_RAND((unsigned char *)keys[j], NUM_PARTIES*16,kkwProof.masterkeys[roundctr++],16);
+
 			for (int k = 0; k < NUM_PARTIES; k++)
 			{
 				Compute_RAND((unsigned char *)&(shares[j][k]),SHA256_INPUTS,(unsigned char *)keys[j][k],16);
-				getAllRandomness(keys[k][j], randomness[k][j]);
+				getAllRandomness(keys[j][k], randomness[j][k]);
 			}
+			computeAuxTape(randomness[j],shares[j]);
 		}
 		else
 		{
@@ -111,26 +118,27 @@ int main(int argc, char * argv[]) {
 			{
 				if ((k+1) != es[j])
 				{
-					memcpy((unsigned char *)keys[j][k],kkwProof.keys[partyctr++],16);
+					memcpy((unsigned char *)keys[j][k],kkwProof.keys[onlinectr][partyctr++],16);
 					Compute_RAND((unsigned char *)&(shares[j][k]),SHA256_INPUTS,(unsigned char *)keys[j][k],16);
-					getAllRandomness(keys[k][j], randomness[k][j]);
+					getAllRandomness(keys[j][k], randomness[j][k]);
 				}
 				else
 				{
 					// ?? online how
+					memset(randomness[j][k],0,rSize);
 				}
 
 			}
+			memcpy(randomness[j][NUM_PARTIES-1],kkwProof.auxBits[onlinectr],rSize);
+			onlinectr++;
 		}
 	}
-	
 	SHA256_CTX ctx,hctx,H1ctx,H2ctx;
 	unsigned char H1hash[SHA256_DIGEST_LENGTH];
 	unsigned char H2hash[SHA256_DIGEST_LENGTH];
 	unsigned char temphash1[SHA256_DIGEST_LENGTH];
 	unsigned char temphash2[SHA256_DIGEST_LENGTH];
 	unsigned char masked_result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
-	unsigned char auxBits[rSize/8+1];
 	View localViews[NUM_ONLINE][NUM_PARTIES];
 
 	roundctr = 0;
@@ -140,7 +148,6 @@ int main(int argc, char * argv[]) {
 	{
 		if (!isOnline(es,k))
 		{
-			computeAuxTape(randomness[k],shares[k]);
 			SHA256_Init(&hctx);
 			for (int j = 0; j < NUM_PARTIES; j++)
 			{
@@ -148,6 +155,7 @@ int main(int argc, char * argv[]) {
 				SHA256_Update(&ctx, keys[k][j], 16);
 				if (j == (NUM_PARTIES-1))
 				{
+/*
 					size_t pos = 0;
 					memset(auxBits,0,rSize/8+1);
                                	 // need to include aux tape
@@ -157,7 +165,8 @@ int main(int argc, char * argv[]) {
 						setBit(auxBits,pos,auxBit);
 						pos++;
 					}
-             				SHA256_Update(&ctx, auxBits, rSize/8+1);
+*/
+             				SHA256_Update(&ctx, randomness[k][NUM_PARTIES-1], rSize);
 				}
 				SHA256_Update(&ctx, rs[k][j], 4);
 				SHA256_Final(temphash1, &ctx);
@@ -177,7 +186,7 @@ int main(int argc, char * argv[]) {
 					SHA256_Update(&ctx, keys[k][j], 16);
 					if (j == (NUM_PARTIES-1))
 					{
-             					SHA256_Update(&ctx, kkwProof.auxBits[roundctr], rSize/8+1);
+             					SHA256_Update(&ctx, kkwProof.auxBits[roundctr], rSize);
 					}
 					SHA256_Update(&ctx, rs[k][j], 4);
 					SHA256_Final(temphash1, &ctx);
@@ -195,26 +204,34 @@ int main(int argc, char * argv[]) {
 	}
 	SHA256_Final(H1hash,&H1ctx);
 
+printf("H1: ");
+printdigest(H1hash);
+
 	SHA256_Init(&H2ctx);
 	roundctr = 0;
-	int onlinectr = 0;
+	onlinectr = 0;
 	for (int k=0; k < NUM_ROUNDS; k++)
 	{
 		int countY = 0;
 		if (!isOnline(es,k))
 		{
+printf("round %d: H2 :",k);
+printdigest(kkwProof.H2[roundctr]);
 			SHA256_Update(&H2ctx,kkwProof.H2[roundctr++],SHA256_DIGEST_LENGTH);
 		}
 		else
 		{
 			SHA256_Init(&hctx);
 			SHA256_Update(&hctx,kkwProof.maskedInput[onlinectr],SHA256_INPUTS);
+			memcpy(&localViews[onlinectr][(es[k]-1)],&kkwProof.views[onlinectr],sizeof(View));
 			mpc_sha256(masked_result[onlinectr],kkwProof.maskedInput[onlinectr],shares[k],NULL,es[k]-1,randomness[k],localViews[onlinectr],&countY);
 			
+printf(" masked inputs %x %x, results %x %x\n",kkwProof.maskedInput[onlinectr][0],kkwProof.maskedInput[onlinectr][1],masked_result[onlinectr][0],masked_result[onlinectr][1]);
 			SHA256_Update(&hctx,masked_result[onlinectr],SHA256_DIGEST_LENGTH);
-			memcpy(&localViews[onlinectr][(es[k]-1)],&kkwProof.views[onlinectr],sizeof(View));
 			SHA256_Update(&hctx,rs[k],NUM_PARTIES*4);
 			SHA256_Final(temphash1,&hctx);
+printf("online round %d: H2 :",k);
+printdigest(temphash1);
 			SHA256_Update(&H2ctx,temphash1,SHA256_DIGEST_LENGTH);
 
 			onlinectr++;
