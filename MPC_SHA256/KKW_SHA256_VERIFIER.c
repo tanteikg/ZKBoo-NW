@@ -57,6 +57,7 @@ int main(int argc, char * argv[]) {
 	
 	z kkwProof;
 	FILE *file;
+	static int once = 0;
 
 	if (argc !=2)
 	{
@@ -70,15 +71,6 @@ int main(int argc, char * argv[]) {
 	}
 	fread(&kkwProof, sizeof(z), 1, file);
 	fclose(file);
-/*
-	uint32_t y[8];
-	reconstruct(as[0].yp[0],as[0].yp[1],as[0].yp[2],y);
-	printf("Proof for hash: ");
-	for(int i=0;i<8;i++) {
-		printf("%02X", y[i]);
-	}
-	printf("\n");
-*/
 
 	int es[NUM_ROUNDS];
 	memset(es,0,NUM_ROUNDS*sizeof(int));
@@ -138,8 +130,10 @@ int main(int argc, char * argv[]) {
 	unsigned char H2hash[SHA256_DIGEST_LENGTH];
 	unsigned char temphash1[SHA256_DIGEST_LENGTH];
 	unsigned char temphash2[SHA256_DIGEST_LENGTH];
-	unsigned char masked_result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
+	unsigned char masked_result[SHA256_DIGEST_LENGTH];
+	unsigned char party_result[NUM_PARTIES][SHA256_DIGEST_LENGTH];
 	View localViews[NUM_ONLINE][NUM_PARTIES];
+	memset(localViews,0,NUM_ONLINE*NUM_PARTIES*sizeof(View));
 
 	roundctr = 0;
 
@@ -204,9 +198,6 @@ int main(int argc, char * argv[]) {
 	}
 	SHA256_Final(H1hash,&H1ctx);
 
-printf("H1: ");
-printdigest(H1hash);
-
 	SHA256_Init(&H2ctx);
 	roundctr = 0;
 	onlinectr = 0;
@@ -215,23 +206,34 @@ printdigest(H1hash);
 		int countY = 0;
 		if (!isOnline(es,k))
 		{
-printf("round %d: H2 :",k);
-printdigest(kkwProof.H2[roundctr]);
 			SHA256_Update(&H2ctx,kkwProof.H2[roundctr++],SHA256_DIGEST_LENGTH);
 		}
 		else
 		{
 			SHA256_Init(&hctx);
 			SHA256_Update(&hctx,kkwProof.maskedInput[onlinectr],SHA256_INPUTS);
-			memcpy(&localViews[onlinectr][(es[k]-1)],&kkwProof.views[onlinectr],sizeof(View));
-			mpc_sha256(masked_result[onlinectr],kkwProof.maskedInput[onlinectr],shares[k],NULL,es[k]-1,randomness[k],localViews[onlinectr],&countY);
-			
-printf(" masked inputs %x %x, results %x %x\n",kkwProof.maskedInput[onlinectr][0],kkwProof.maskedInput[onlinectr][1],masked_result[onlinectr][0],masked_result[onlinectr][1]);
-			SHA256_Update(&hctx,masked_result[onlinectr],SHA256_DIGEST_LENGTH);
+			memcpy(&localViews[onlinectr][es[k]-1],&kkwProof.views[onlinectr],sizeof(View));
+			mpc_sha256(masked_result,kkwProof.maskedInput[onlinectr],shares[k],NULL,es[k]-1,randomness[k],localViews[onlinectr],party_result,&countY);
+			if (0)
+			{
+				printf("mpc round %d verification of hash: ",k);
+				for (int j=0;j<SHA256_DIGEST_LENGTH;j++)
+				{
+					unsigned char temp = masked_result[j];
+					for (int i=0;i<NUM_PARTIES;i++)
+					{
+						temp ^= party_result[i][j];
+					}
+					printf("%02X",temp);
+				}
+				printf("\n");
+		//		once = 1;
+			}
+			SHA256_Update(&hctx,masked_result,SHA256_DIGEST_LENGTH);
+			for (int j = 0; j < 32; j++)
+				SHA256_Update(&hctx, localViews[onlinectr][j].y,ySize*4);
 			SHA256_Update(&hctx,rs[k],NUM_PARTIES*4);
 			SHA256_Final(temphash1,&hctx);
-printf("online round %d: H2 :",k);
-printdigest(temphash1);
 			SHA256_Update(&H2ctx,temphash1,SHA256_DIGEST_LENGTH);
 
 			onlinectr++;
@@ -244,7 +246,7 @@ printdigest(temphash1);
 	SHA256_Update(&hctx,H2hash,SHA256_DIGEST_LENGTH);
 	SHA256_Final(temphash1,&hctx);
 
-	if (memcpy(temphash1,kkwProof.H,SHA256_DIGEST_LENGTH))
+	if (memcmp(temphash1,kkwProof.H,SHA256_DIGEST_LENGTH))
 	{
 		printf("Error: Hash does not match\n");
 		return -1;
@@ -254,10 +256,10 @@ printdigest(temphash1);
 		printf("Received pre-image proof for hash : ");
 		for (int j = 0; j<SHA256_DIGEST_LENGTH;j++)
 		{
-			unsigned char temp = masked_result[0][j];
+			unsigned char temp = masked_result[j];
 			for (int i=0;i<NUM_PARTIES;i++)
 			{
-				temp ^= localViews[0][i].results[j];
+				temp ^= party_result[i][j];
 			}
 			printf("%02X",temp);
 		}

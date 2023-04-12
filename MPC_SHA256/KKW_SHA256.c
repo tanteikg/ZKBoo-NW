@@ -140,12 +140,9 @@ int main(int argc, char * argv[])
 	}
 	SHA256_Final(temphash1,&H1ctx);
 
-printf("H1 :");
-printdigest(temphash1);
-
-
 	//Running MPC-SHA2 online
 	unsigned char masked_result[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
+	unsigned char party_result[NUM_PARTIES][SHA256_DIGEST_LENGTH];
 	unsigned char maskedInputs[NUM_ROUNDS][SHA256_INPUTS];
 	View localViews[NUM_ROUNDS][NUM_PARTIES];
 	unsigned char H2[NUM_ROUNDS][SHA256_DIGEST_LENGTH];
@@ -153,31 +150,15 @@ printdigest(temphash1);
 //	#pragma omp parallel for
 	for(int k=0; k<NUM_ROUNDS; k++) {
 		int countY = 0;
-	/*
-		printf("shares:");
-		for (int l=0;l<NUM_PARTIES;l++)
-		{
-			printf("party %d:",l);
-		for (int j=0;j<10;j++)
-		{
-			printf("%02X",shares[k][l][j]);
-		}
-		printf("\n");
-		}
-	*/	
-		mpc_sha256(masked_result[k],maskedInputs[k],shares[k],input, i, randomness[k], localViews[k],&countY);
-		
+
+		mpc_sha256(masked_result[k],maskedInputs[k],shares[k],input, i, randomness[k], localViews[k],party_result,&countY);
 		SHA256_Init(&hctx);
 		SHA256_Update(&hctx,maskedInputs[k],SHA256_INPUTS);
 		SHA256_Update(&hctx,masked_result[k],SHA256_DIGEST_LENGTH);
-if ((k == 5) || (k==6))
-	printf("round %d, masked input %x %x, masked result %x %x\n",k,maskedInputs[k][0],maskedInputs[k][1],masked_result[k][0],masked_result[k][1]);
 		for (int j=0;j<NUM_PARTIES;j++)
 			SHA256_Update(&hctx, localViews[k][j].y,ySize*4);
 		SHA256_Update(&hctx, rs[k], NUM_PARTIES*4);
 		SHA256_Final(H2[k],&hctx);
-printf("round %d: H2 : ",k);
-printdigest(H2[k]);
 		SHA256_Update(&H2ctx, H2[k], SHA256_DIGEST_LENGTH);
 		if (k == 0)
 		{
@@ -187,7 +168,7 @@ printdigest(H2[k]);
 				unsigned char temp = masked_result[k][j];
 				for (int i=0;i<NUM_PARTIES;i++)
 				{
-					temp ^= localViews[k][i].results[j];
+					temp ^= party_result[i][j];
 				}
 				printf("%02X",temp);
 			}
@@ -220,10 +201,8 @@ printdigest(H2[k]);
 		}
 		else
 		{
-printf("online round %d: ",i);
 			memcpy(kkwProof.auxBits[onlinecount],randomness[i][NUM_PARTIES-1],rSize);
 			memcpy(kkwProof.maskedInput[onlinecount],maskedInputs[i],SHA256_INPUTS);
-printf("masked input %x %x\n",maskedInputs[i][0],maskedInputs[i][1]);
 			int partycount = 0;
 			for (int j = 0; j < NUM_PARTIES; j++)
 			{

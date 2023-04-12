@@ -81,7 +81,7 @@ static const uint32_t k[64] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 		0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2 };
 
 //#define ySize 736
-#define ySize 728 
+#define ySize (728 + 8)
 //#define rSize 2912 
 #define rSize (45392/8) // 2912*2 = 5824 
 #define NUM_PARTIES 32 
@@ -90,7 +90,6 @@ static const uint32_t k[64] = { 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 #define NUM_ONLINE 7  // out of NUM_ROUNDS
 
 typedef struct {
-	unsigned char results[SHA256_DIGEST_LENGTH];
 	uint32_t y[ySize];
 } View;
 
@@ -115,6 +114,7 @@ typedef struct {
 
 #define MAX_DIGEST_SIZE 64
 #define SHA256_DIGEST_SIZE 32
+
 
 void Compute_RAND(unsigned char * output, int size, unsigned char * seed, int seedLen)
 {
@@ -213,16 +213,6 @@ void cleanup_EVP() {
 	ERR_free_strings();
 }
 
-void H(unsigned char k[16], View v, unsigned char r[4], unsigned char hash[SHA256_DIGEST_LENGTH]) {
-	SHA256_CTX ctx;
-	SHA256_Init(&ctx);
-	SHA256_Update(&ctx, k, 16);
-	SHA256_Update(&ctx, &v, sizeof(v));
-	SHA256_Update(&ctx, r, 4);
-	SHA256_Final(hash, &ctx);
-}
-
-
 void H3(unsigned char finalhash[SHA256_DIGEST_LENGTH], int s, int es[NUM_ROUNDS]) {
 
 	unsigned char hash[SHA256_DIGEST_LENGTH];
@@ -265,26 +255,6 @@ void H3(unsigned char finalhash[SHA256_DIGEST_LENGTH], int s, int es[NUM_ROUNDS]
 		}
 	}
 
-}
-
-void output(View v, uint32_t* result) {
-	memcpy(result, &v.y[ySize - 8], 32);
-}
-
-void reconstruct(uint32_t* y0, uint32_t* y1, uint32_t* y2, uint32_t* result) {
-	for (int i = 0; i < 8; i++) {
-		result[i] = y0[i] ^ y1[i] ^ y2[i];
-	}
-}
-
-void mpc_XOR2(uint32_t x[2], uint32_t y[2], uint32_t z[2]) {
-	z[0] = x[0] ^ y[0];
-	z[1] = x[1] ^ y[1];
-}
-
-void mpc_NEGATE2(uint32_t x[2], uint32_t z[2]) {
-	z[0] = ~x[0];
-	z[1] = ~x[1];
 }
 
 omp_lock_t *locks;
@@ -395,6 +365,29 @@ void setBit(uint8_t* bytes, uint32_t bitNumber, uint8_t val)
 				& ~(1 << (7 - (bitNumber % 8)))) | (val << (7 - (bitNumber % 8)));
 }
 
+int toEndian32(int pos)
+{
+	static int init = 0;
+	static uint32_t a[32];
+	int count;
+	if (!init)
+	{
+		for (int i = 0 ; i < 32; i++)
+		{
+			a[i] = 0;
+			count = 32;
+			setBit((unsigned char *)&a[i],i,1);
+			while (a[i] > 0)
+			{
+				a[i]>>=1;
+				count--;
+			}
+			a[i] = count;
+		}
+		init =1 ;
+	}
+	return a[pos]; 
+}
 
 
 static uint32_t parity32(uint32_t x)
@@ -428,7 +421,7 @@ static uint32_t tapesToWord(unsigned char randomness[NUM_PARTIES][rSize],int * r
 	for (size_t i = 0; i < NUM_PARTIES;i++) // NUM_PARTIES = 32 
 	{
 		uint8_t bit = getBit(randomness[i],*randCount);
-		setBit((uint8_t*)&shares,i,bit);
+		setBit32(&shares,i,bit);
 	}
 	*randCount += 1;
 
@@ -464,7 +457,7 @@ int32_t aux_bit_AND(uint8_t mask_a, uint8_t mask_b, unsigned char randomness[NUM
 
 	size_t lastParty = NUM_PARTIES-1;
 	uint32_t and_helper = tapesToWord(randomness,randCount);
-	setBit((uint8_t*)&and_helper,NUM_PARTIES-1,0);
+	setBit32(&and_helper,NUM_PARTIES-1,0);
 	uint8_t aux_bit = (mask_a & mask_b) ^ parity32(and_helper);
 	setBit(randomness[lastParty], *randCount-1,aux_bit);
 
@@ -712,7 +705,7 @@ int mpc_AND_verify(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint3
 
 
 		s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
-		setBit32(&s_shares,unopenParty,getBit((uint8_t*)&views[unopenParty].y[*countY],i));
+		setBit32(&s_shares,unopenParty,getBit32(views[unopenParty].y[*countY],i));
 
 		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 		{
@@ -723,7 +716,7 @@ int mpc_AND_verify(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint3
 		// write s_shares to view									                 
 		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 		{
-			setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
+			setBit32(&views[j].y[*countY],i,s_shares & 0x01);
 			s_shares >>=1;
 		}
 	}
@@ -759,7 +752,7 @@ void mpc_AND(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint32_t x[
 		// write s_shares to view									                 
 		for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 		{
-			setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
+			setBit32(&views[j].y[*countY],i,s_shares & 0x01);
 			s_shares >>=1;
 		}
 	}
@@ -794,13 +787,13 @@ int mpc_ADD_verify(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint3
 			aANDb = tapesToWord(randomness,randCount);
 			and_helper = tapesToWord(randomness,randCount);
 			s_shares = (extend(a) & mask_b) ^ (extend(b) & mask_a) ^ and_helper ^ aANDb;
-			setBit32(&s_shares,unopenParty,getBit((uint8_t*)&views[unopenParty].y[*countY],i));
+			setBit32(&s_shares,unopenParty,getBit32(views[unopenParty].y[*countY],i));
 			c = parity32(s_shares)^(a&b)^c;
 			aANDb ^= mask_c;
 
 			for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 			{
-				setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
+				setBit32(&views[j].y[*countY],i,s_shares & 0x01);
 				s_shares >>=1;
 				setBit32(&carry[j],i-1,aANDb & 0x01);
 				aANDb >>=1;
@@ -846,7 +839,7 @@ void mpc_ADD(uint32_t x_state, uint32_t y_state, uint32_t * z_state, uint32_t x[
 
 			for (int j = (NUM_PARTIES-1); j >= 0 ; j--)
 			{
-				setBit((uint8_t *)&views[j].y[*countY],i,s_shares & 0x01);
+				setBit32(&views[j].y[*countY],i,s_shares & 0x01);
 				s_shares >>=1;
 				setBit32(&carry[j],i-1,aANDb & 0x01);
 				aANDb >>=1;
@@ -936,7 +929,7 @@ static uint32_t consol(uint32_t array[NUM_PARTIES])
 
 
 
-int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH], unsigned char masked_input[SHA256_INPUTS], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], int* countY) 
+int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH], unsigned char masked_input[SHA256_INPUTS], unsigned char shares[NUM_PARTIES][SHA256_INPUTS], unsigned char * inputs, int numBytes, unsigned char randomness[NUM_PARTIES][rSize], View views[NUM_PARTIES], unsigned char party_result[NUM_PARTIES][SHA256_DIGEST_LENGTH], int* countY) 
 {
 
 	if ((inputs) && (numBytes > 55))
@@ -1225,28 +1218,46 @@ int mpc_sha256(unsigned char masked_result[SHA256_DIGEST_LENGTH], unsigned char 
 			return -1;
 	}
 
+	for (int i = 0; i < 8; i++)
+	{
+		for (int j = 0; j < NUM_PARTIES; j++)
+		{
+			if (inputs)
+			{
+				views[j].y[*countY] = hHa[i][j];
+			}
+			else
+			{
+				if (j == numBytes)
+					hHa[i][j] = views[j].y[*countY];
+				else
+					views[j].y[*countY] = hHa[i][j];
+			}
+		}
+		*countY+=1;
+	}
 	for (int i = 0; i < 8; i++) {
 		mpc_RIGHTSHIFT(hHa[i], 24, t0);
 		t0_state = hHa_state[i] >> 24;
 
 		for (int j = 0;j< NUM_PARTIES;j++)
-			views[j].results[i * 4] = t0[j];
+			party_result[j][i * 4] = t0[j];
 		masked_result[i*4] = t0_state;
 
 		mpc_RIGHTSHIFT(hHa[i], 16, t0);
 		t0_state = hHa_state[i] >> 16;
 		for (int j = 0;j< NUM_PARTIES;j++)
-			views[j].results[i * 4 + 1] = t0[j];
+			party_result[j][i * 4 + 1] = t0[j];
 		masked_result[i*4+1] = t0_state;
 
 		mpc_RIGHTSHIFT(hHa[i], 8, t0);
 		t0_state = hHa_state[i] >> 8;
 		for (int j = 0;j< NUM_PARTIES;j++)
-			views[j].results[i * 4 + 2] = t0[j];
+			party_result[j][i * 4 + 2] = t0[j];
 		masked_result[i*4+2] = t0_state;
 
 		for (int j = 0;j< NUM_PARTIES;j++)
-			views[j].results[i * 4 + 3] = hHa[i][j];
+			party_result[j][i * 4 + 3] = hHa[i][j];
 		masked_result[i*4+3] = hHa_state[i];
 	}
 //	printf("mpc_sha256: randCount %d\n",randCount);
