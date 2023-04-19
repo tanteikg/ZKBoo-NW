@@ -14,3 +14,8 @@ Extended the ZKBoo implementation with more MPC-in-the-head implementations for 
 
 First use-case is "MPC_ADDRESS": Proof of address ownership without revealing public key 
 
+# Apr 2023
+
+Author: Tan Teik Guan
+
+Check out the MPC_SHA256 folder. I've implemented NIZKPoK of SHA256 using KKW.
